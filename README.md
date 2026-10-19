@@ -16,7 +16,7 @@
 | 搜索与训练 write-up | [FNR_search_writeup.pdf](FNR_search_writeup.pdf)：搜索策略、时间验证与泛化分析；附[源文件及实验记录](writeups_aux/search_methodology/) |
 | Agent skill | [constraint-driven-model-research](skills/constraint-driven-model-research/SKILL.md)：规则核对、基线复现、自适应搜索与模型交付流程 |
 
-## 使用流程
+## 代码使用流程
 
 使用 Python 3.11，以下命令在本目录执行。数据格式及完整接口见[代码说明](submission/README.md)；随包权重可直接用于推理。
 
@@ -54,10 +54,10 @@ scores = model.predict(as_of_date, data)
 
 ## 评测结果与研究材料
 
-| 评测 | RankIC | Information Ratio | 综合排名 |
+| Leaderboard | RankIC | Information Ratio | Ranking |
 | --- | ---: | ---: | ---: |
-| public leaderboard | 0.0850 | 5.5684 | 2 |
-| private leaderboard | 0.0825 | 5.2132 | 1 |
+| public | 0.0850 | 5.5684 | 2 |
+| private | 0.0825 | 5.2132 | 1 |
 
 上述成绩由比赛平台给出。本地训练方法、年度验证和模型选择过程见两份 write-up；LaTeX 源文件、搜索记录与提交成绩位于 [writeups_aux/](writeups_aux/)。材料索引、图表重建与编译命令见[附件说明](writeups_aux/search_methodology/README.md)。
 
