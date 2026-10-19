@@ -5,7 +5,7 @@
 
 结合截面因子表示、股票邻域信息、历史窗口统计与受约束重排的股票截面预测模型。
 
-本模型于 **[上海科技大学第一届量化金融挑战赛](https://datatech.geekpie.club/c/csi300-2026)** Private Leaderboard 位列 **第 1** · **RankIC = 0.0825** · **Information Ratio = 5.2132**。
+本模型于 **[上海科技大学沪深300指数增强与截面选股数据科学挑战赛](https://datatech.geekpie.club/c/csi300-2026)** Private Leaderboard 位列 🏆**第 1** · **RankIC = 0.0825** · **Information Ratio = 5.2132**。
 
 ## 资源
 
