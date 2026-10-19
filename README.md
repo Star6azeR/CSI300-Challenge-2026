@@ -76,4 +76,4 @@ $constraint-driven-model-research
 
 ## 许可
 
-原创代码、模型权重与 write-up 的发布许可证尚待指定。随附回测优化器采用 Apache-2.0 许可，来源与许可证见 [third_party/](writeups_aux/search_methodology/third_party/)。
+Apache-2.0
