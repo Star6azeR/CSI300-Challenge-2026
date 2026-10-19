@@ -1,0 +1,28 @@
+全因子网络参数研究，2026-10-12
+所有因子网络参数均开放，包括此前关闭的6个语义路由参数；每个版本重建缓存并重训两修正头。
+范围：D223仍是固定基座，不能称为整个提交包所有模型全部重训。
+固定融合D223/辅助60/40、P01/R1=47.5/52.5，没有混合系数搜索。
+目标公榜RankIC>=0.092、IR>=5.5；所有本地年份已观察，未产生新的公榜结果。
+首批：SLOW低学习率、FREE无教师约束、ANCHOR强教师约束、RANK去掉NLL。
+自适应追加：DISCLR全参数分层学习率，RECENT因子微调采用最近三年窗口；详见adaptive_addendum.json。
+先在2022失败年做压力筛选，delta<-0.0002剪枝；通过者再按2020/2021/2019分阶段扩展。
+candidate  year   RankIC     delta
+   DISCLR  2022 0.077524 -0.000865
+     FREE  2022 0.076361 -0.002027
+     SLOW  2022 0.077934 -0.000455
+   ANCHOR  2022 0.077686 -0.000702
+     RANK  2022 0.077478 -0.000910
+   RECENT  2022 0.077806 -0.000583
+candidate  years  mean_delta  worst_delta  positive_years  top30_overlap  continuous_delta
+     SLOW   2022   -0.000455    -0.000455               0       0.897245               NaN
+   RECENT   2022   -0.000583    -0.000583               0       0.861983               NaN
+   ANCHOR   2022   -0.000702    -0.000702               0       0.910055               NaN
+   DISCLR   2022   -0.000865    -0.000865               0       0.885124               NaN
+     RANK   2022   -0.000910    -0.000910               0       0.843388               NaN
+     FREE   2022   -0.002027    -0.002027               0       0.788705               NaN
+完整打包前门槛通过者：[]
+资源与数值检查：{"teacher_fits": 6, "peer_fits": 12, "total_training_jobs": 18, "all_factor_parameters_trainable": true, "D223_retrained": false, "fusion_weights_unchanged": true, "qualified_for_package_checks": [], "public_submissions": 0, "target_achieved": false, "training_peak_RSS_MiB": 6145.75, "max_numpy_error": 1.1137220681106674e-07, "inference_memory_measured": false}
+若列表为空，不训练部署版本、不打包。
+没有计算本地组合IR；本地筛选不能证明公榜IR达标。
+原数据/结果未覆盖；teachers与fits保存模型、配置、训练合同及逐轮loss，ALL_EXPERIMENTS.csv保存结果。
+只在观察过的2022失败不证明所有年份均失败，更不证明全参数训练不可行；这些是开发筛选结果。

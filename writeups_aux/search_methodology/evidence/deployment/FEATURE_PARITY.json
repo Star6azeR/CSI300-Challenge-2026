@@ -1,0 +1,26 @@
+[
+  {
+    "date": "2019-12-31",
+    "historical_rows": 6300,
+    "columns": 410,
+    "all_feature_values_exact": true
+  },
+  {
+    "date": "2021-06-15",
+    "historical_rows": 6300,
+    "columns": 410,
+    "all_feature_values_exact": true
+  },
+  {
+    "date": "2022-05-06",
+    "historical_rows": 6300,
+    "columns": 410,
+    "all_feature_values_exact": true
+  },
+  {
+    "date": "2022-12-30",
+    "historical_rows": 6300,
+    "columns": 410,
+    "all_feature_values_exact": true
+  }
+]

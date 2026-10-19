@@ -1,0 +1,15 @@
+{
+  "year": 2023,
+  "train_start": 20160101,
+  "train_signal_end": 20221230,
+  "train_label_exit_max": 20221230,
+  "label_cutoff_exclusive": 20230101,
+  "label": "adjusted O(t+2)/O(t+1)-1",
+  "H": 1,
+  "feature_lookback": 61,
+  "feature_count": 347,
+  "asof_feature_rows": 510900,
+  "valid_training_labels": 499799,
+  "label_mask_controls_membership": false,
+  "window_years": null
+}

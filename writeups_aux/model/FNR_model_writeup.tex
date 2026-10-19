@@ -1,0 +1,979 @@
+% !TEX program = xelatex
+\documentclass[UTF8,11pt,a4paper,fontset=fandol]{ctexart}
+% Treat missing glyphs as errors instead of silently producing blank text.
+\tracinglostchars=3
+% Prefer native TrueType CJK fonts on macOS; retain Fandol elsewhere.
+% This avoids the Fandol CFF font path when testing PDF preview compatibility.
+\IfFontExistsTF{Songti SC}{%
+  \setCJKmainfont{Songti SC}%
+  \setCJKfamilyfont{zhsong}{Songti SC}%
+}{}
+\IfFontExistsTF{Heiti SC}{%
+  \setCJKsansfont{Heiti SC}%
+  \setCJKfamilyfont{zhhei}{Heiti SC}%
+}{}
+\usepackage[margin=2.54cm]{geometry}
+\usepackage{amsmath,amssymb,bm,booktabs,tabularx,array,graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit}
+\usepackage{xcolor,fancyhdr,enumitem,microtype}
+% Module colors.
+\definecolor{rhShared}{HTML}{59636D}
+\definecolor{rhBase}{HTML}{245B96}
+\definecolor{rhTeacher}{HTML}{006C67}
+\definecolor{rhNeighbor}{HTML}{936500}
+\definecolor{rhCorrection}{HTML}{754599}
+\definecolor{rhFusion}{HTML}{B0442E}
+\tikzset{
+ rh shared/.style={draw=rhShared,fill=rhShared!5},
+ rh base/.style={draw=rhBase,fill=rhBase!5},
+ rh teacher/.style={draw=rhTeacher,fill=rhTeacher!5},
+ rh neighbor/.style={draw=rhNeighbor,fill=rhNeighbor!5},
+ rh correction/.style={draw=rhCorrection,fill=rhCorrection!5},
+ rh fusion/.style={draw=rhFusion,fill=rhFusion!5},
+ rh flow/.style={->,line width=.8pt,draw=black!60},
+ rh training/.style={dashed}
+}
+\usepackage[colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,urlcolor=blue!45!black,breaklinks=true]{hyperref}
+\usepackage{url,caption}
+\hypersetup{pdftitle={FNR：因子邻域排序模型 - write-up},pdfauthor={Shihan Zhao},pdfsubject={Factor Neighborhood Ranker}}
+\captionsetup[figure]{skip=6pt,font=small,hypcap=false}
+% Keep each diagram together with its single caption.
+\newenvironment{methodfigure}{%
+  \par\addvspace{6pt}\noindent\begin{minipage}{\linewidth}%
+  
+
+\setlength{\parindent}{2em}\captionsetup{type=figure}%
+}{%
+  \end{minipage}\par\addvspace{6pt}%
+}
+
+\setlength{\parindent}{2em}
+\makeatletter
+\renewcommand{\maketitle}{%
+  \thispagestyle{plain}%
+  \begin{center}
+    {\LARGE\@title\par}\vspace{.65em}
+    {\normalsize\@author\par}\vspace{.35em}
+    {\small\@date\par}
+  \end{center}\vspace{.5em}%
+}
+\makeatother
+
+\setlength{\parskip}{0.2em}
+\linespread{1.12}
+\ctexset{section={
+  beforeskip=30pt plus 4pt minus 2pt,
+  afterskip=18pt plus 2pt minus 2pt
+}}
+\emergencystretch=2em
+\setlist{nosep,leftmargin=2em}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small FNR：因子邻域排序模型}
+\fancyhead[R]{\small write-up}
+\fancyfoot[C]{\small\thepage}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Beta}{\bm{\beta}}
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\clip}{\operatorname{clip}}
+\newcommand{\softplus}{\operatorname{softplus}}
+\newcommand{\E}{\mathbb{E}}
+\title{\bfseries FNR：因子邻域排序模型\\[0.35em]\large 条件因子表示、窗口统计与受约束重排}
+\author{Shihan Zhao}
+\date{2026年10月16日}
+\begin{document}
+\maketitle
+\begin{abstract}
+短期股票预测需要同时解决两个相关但不等价的问题：如何辨别同日股票的未来收益顺序，以及如何让排序信息在风险与交易约束下转化为稳定的组合收益。本文提出FNR（Factor Neighborhood Ranker，因子邻域排序模型），在RH50的表格模型集成与条件因子邻域结构上结合近期信息适应与排序区域分工。基础分支提供整体排序；条件因子网络描述共同变化，并通过相近股票间的有界修正补充相对判断。在此基础上，模型利用最近20个已实现标签截面的二阶统计量，计算带固定先验和正则的闭式修正；上下文神经头结合近期特征贡献与市场状态，再由两层排序约束限定这些新增信息的作用范围。最终输出保留参考信号的前60只股票及其顺序，以增强信号重排其余股票。在2019--2022年开发区间，连续平均秩信息系数由0.085032提高至0.088717，固定费用与组合约束下四个年度的信息比率均高于参考信号。参赛反馈记录的公开评测为RankIC 0.0850、IR 5.5684，私有评测为RankIC 0.0825、IR 5.2132，公榜总成绩排名第2，私榜总成绩排名第1。结果支持将全截面信息提取与高分区域决策稳定性分别建模的可行性；模块贡献、选择偏差以及不同市场和组合规则下的适用性仍需进一步验证。
+\end{abstract}
+\noindent\textbf{关键词：}截面排序；条件因子模型；窗口统计；受约束重排；组合信息比率
+
+\section{问题、数据与评价}
+\subsection{从收益预测到截面排序}
+沪深300指数（CSI 300，China Securities Index 300）跟踪中国境内一组大中型上市公司的表现。指数增强的目标是在控制相对基准的风险偏离时争取超额收益。本任务每天为当日成分股生成预测分数，再由组织方在持仓、风险和交易约束下构造投资组合\cite{competition}。它构成一个候选集合随时间变化、标签噪声较大、且最终评价包含决策环节的排序问题。
+
+“截面”指同一时点的不同股票集合。记交易日$t$的股票池为$\mathcal U_t$，其大小为$N_t$；每只股票具有$d=347$维输入，形成矩阵$X_t\in\R^{N_t\times d}$。模型根据截至$t$收盘时可获得的信息，输出分数向量$s_t\in\R^{N_t}$。同日输入之间存在交互，推理还会重建近期历史截面。因此，完整映射是$s_t=f_\theta(\mathcal D_{t-119:t})$，其中$\mathcal D$表示当次可见的原始数据窗口，$\theta$为离线固定的模型权重与计算配置；$X_t$是从中构造的当日输入。
+
+监督目标是下一交易日开盘至再下一交易日开盘的收益：
+\begin{equation}
+ y_{i,t}=\frac{O_{i,t+2}}{O_{i,t+1}}-1,\qquad H=1,
+ \label{eq:label}
+\end{equation}
+其中$O$为官方数据中的复权开盘价，$H$表示持有的交易周期数，下标按市场交易日历推进。例如，周五收盘形成信号后，通常以周一开盘为入场端点、周二开盘为退出端点；遇节假日则顺延。停牌、缺失或非正价格会使部分标签无效。训练和评价中的监督掩码用于排除这些标签，但预测时不能根据未来标签是否有效来选择股票。
+
+模型分数表达相对偏好，分数越大表示预测表现越好；组合权重由组织方的下游优化器确定。
+
+\subsection{输入数据与特征表示}
+数据来自三张官方表：\texttt{MarketData}提供行情，\texttt{Factor33\_winsor}提供加工后的量价、财务及状态字段，\texttt{Barra\_factor}提供十项风格暴露并确定当日股票池。三表按“日期、股票代码”对齐。Barra是官方风险模型字段的名称；“暴露”表示股票在市值、波动、流动性等共同属性上的位置。
+
+\begin{table}[htbp]\centering\small
+\caption{输入表示的组成。数量统计针对基础分支与条件因子编码器读取的347列，不包括键字段。}\label{tab:features}
+\begin{tabularx}{\linewidth}{l r X}\toprule
+特征组 & 数量 & 内容及建模作用\\\midrule
+官方风格 & 10 & 市值、贝塔、动量、残差波动等，用于描述共同风险属性。\\
+其他官方字段 & 33 & 收益与成交指标、估值与财务比率、上市及交易状态等。\\
+行情派生量 & 128 & 多窗口收益、波动、价格区间位置、日内与隔夜收益、成交活跃度及量价关系。\\
+平滑与变化 & 48 & 部分官方指标的短期均值和变化，描述状态持续性与近期调整。\\
+原值副本 & 128 & 保留部分变量在截面排名前的数值；部分价格量已先作相对化。\\\midrule
+合计 & 347 & 同时保留相对位置与部分幅度信息。\\\bottomrule
+\end{tabularx}
+\end{table}
+
+对许多连续变量，模型使用同日百分位排名，使不同股票可按相对位置比较；对部分变量同时保留原值副本，避免完全丢失幅度信息。以$C_{i,t}$表示收盘价，五日累计收益为$C_{i,t}/C_{i,t-5}-1$，其排名表达过去五日涨跌在股票池中的位置，原值则保留涨跌幅度。两天的第一名具有相同的最高排名，却可能对应明显不同的收益幅度。347列包含这些互补表示及相关变量。
+
+输入遵循时点可得性（Point-in-Time，PIT）：特征只能使用信号形成时已经存在的信息\cite{competition}。单日基础特征最多依赖61个交易日，基础分数的前日平滑使该路径需要62日。本文还重建近期历史日期的因子表示；最早需要的表示日为$t-21$，向前展开其特征后，原始数据依赖可至$t-81$，仍在120个交易日的总输入范围内。较长窗口在历史不足时保留缺失值，不用未来值补齐。各历史日期均使用该日成分股，避免用后来的股票池反推过去。预处理的均值、标准差和填补值由训练数据拟合，部署后保持冻结。
+
+\subsection{输入与输出预览}
+表\ref{tab:inputpreview}给出2022年5月6日三张原始表中的部分字段，按股票代码顺序选择前三只股票。价格为官方复权价格，风格数值采用官方暴露尺度，\texttt{daily\_return}记录当日收益。该例的推理输入覆盖2021年11月5日至2022年5月6日的120个交易日，表格展示最后一日。
+
+\begin{table}[htbp]\centering\small
+\caption{输入数据节选：2022-05-06，数值经四舍五入。}\label{tab:inputpreview}
+\begin{tabular}{lrrrrr}\toprule
+股票代码 & 开盘价 & 收盘价 & 当日收益 & 市值暴露 & 贝塔暴露\\\midrule
+\texttt{SH600000} & 14.2979 & 14.1358 & $-0.01768$ & 0.86622 & 0.03679\\
+\texttt{SH600009} & 53.1169 & 51.5245 & $-0.06212$ & 0.59197 & 0.71572\\
+\texttt{SH600010} & 2.5588 & 2.5307 & $-0.03279$ & 0.46823 & 0.87960\\\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]\centering\small
+\caption{相同股票的实际模型输出，接口字段为\texttt{date}、\texttt{code}、\texttt{score}。}\label{tab:outputpreview}
+\begin{tabular}{llr}\toprule
+\texttt{date} & \texttt{code} & \texttt{score}\\\midrule
+2022-05-06 & SH600000 & 0.690000000000\\
+2022-05-06 & SH600009 & 0.070000000000\\
+2022-05-06 & SH600010 & 0.998333333333\\\bottomrule
+\end{tabular}
+\end{table}
+
+表\ref{tab:outputpreview}节选模型在完整300只当日股票上的推理结果。该日期属于训练区间，此处用于展示输入与输出接口。
+
+\subsection{排序指标与组合指标}
+\paragraph{平均秩信息系数。}
+信息系数（Information Coefficient，IC）描述预测信号与实际收益的相关程度。本文使用其秩相关形式RankIC，即Spearman相关\cite{competition}。在日期$t$的有效评价集合$\mathcal V_t\subseteq\mathcal U_t$上，令$p_{i,t}$与$q_{i,t}$分别为预测分数和真实收益的秩，数值相同时取平均秩。则
+\begin{equation}
+ \mathrm{RankIC}_t=
+ \frac{\sum_{i\in\mathcal V_t}(p_{i,t}-\bar p_t)(q_{i,t}-\bar q_t)}
+ {\sqrt{\sum_{i\in\mathcal V_t}(p_{i,t}-\bar p_t)^2}
+  \sqrt{\sum_{i\in\mathcal V_t}(q_{i,t}-\bar q_t)^2}},\qquad
+ \overline{\mathrm{RankIC}}=\frac{1}{|\mathcal T|}\sum_{t\in\mathcal T}\mathrm{RankIC}_t.
+ \label{eq:rankic}
+\end{equation}
+$\bar p_t,\bar q_t$为截面均值，$\mathcal T$为相关系数有效的日期集合。计算时排除缺失标签和零秩方差情形，并对有效日期等权平均。
+
+\paragraph{组合信息比率。}
+信息比率（Information Ratio，IR）以单位主动风险衡量相对基准的收益。记组合和基准的日收益为$r^p_t,r^b_t$，主动收益为$e_t=r^p_t-r^b_t$；组合收益应使用回测中已经计入费用的净收益。令$T_p$为组合收益日期数，$A$为一年采用的交易日数，$V^p_{T_p},V^b_{T_p}$为起点归一为1的期末净值。本地回测采用skd-backtest框架\cite{skdbacktest}，IR的计算口径为
+\begin{align}
+ R^p_{\rm ann}&=(V^p_{T_p})^{A/T_p}-1,
+ &R^b_{\rm ann}&=(V^b_{T_p})^{A/T_p}-1,\notag\\
+ \mathrm{TE}&=\sqrt{A}\sqrt{\frac{1}{T_p-1}\sum_{t=1}^{T_p}(e_t-\bar e)^2},
+ &\mathrm{IR}&=\frac{R^p_{\rm ann}-R^b_{\rm ann}}{\mathrm{TE}}.
+ \label{eq:ir}
+\end{align}
+TE是跟踪误差（Tracking Error），即主动收益的年化波动。本地实现采用$A=252$；式\eqref{eq:ir}使用复合年化收益之差，与$\sqrt A\,\bar e/\operatorname{sd}(e)$的算术年化口径存在差异。公开评测按赛题定义报告IR\cite{competition}，其隐藏期净值和完整回测参数未披露。
+
+\paragraph{为何两个目标并不等价。}
+RankIC只关心同日顺序，不按真实收益差距或主动持仓大小赋权；IR则取决于优化器实际采用了哪些信号，以及这些头寸的净收益和风险。若排序信息主要对应被约束的风格方向，整体秩相关较高也可能难以转化为主动收益。另一方面，两只股票交换名次对RankIC的影响可能很小，但若它们收益差距较大且影响组合配置，经济结果可能明显变化。本文据此研究两类约束：以相近风险属性组织局部比较，以及限制增强信号能够改变的排序区域。这里的“头部”仅指分数最高的一组股票，并不预设它们就是最终持仓。
+
+\section{相关工作}
+\subsection{金融预测中的表格学习}
+Gu等\cite{gu2020}系统研究了机器学习在股票风险溢价预测中的应用，揭示了非线性和变量交互的建模价值。与其风险溢价研究相比，本文更关注短周期截面排序，即在同一日期区分股票的相对表现。
+
+梯度提升决策树（Gradient Boosting Decision Tree，GBDT）通过逐步加入树来拟合前序模型尚未解释的部分。LightGBM是其高效实现\cite{ke2017}，能自然表达阈值、交互和不同尺度变量。Grinsztajn等\cite{grinsztajn2022}在通用表格基准中指出，树模型在中等规模数据上仍具有竞争力，并讨论无信息特征和不规则目标函数对神经网络的影响。这些结果为保留具有不同函数结构的基础学习器提供了依据。
+
+多层感知机（Multilayer Perceptron，MLP）通过全连接层学习非线性映射。TabM是Gorishniy等\cite{gorishniy2025}提出的表格神经网络：它通过共享大部分参数同时训练多个隐式MLP成员，在集成效果与计算开销之间取得平衡。本文采用8成员的小型TabM。分段线性编码（Piecewise Linear Encoding，PLE）在相邻数值节点间表达标量的相对位置；Gorishniy等\cite{gorishniy2022}将其用于数值嵌入，使主干网络能更灵活地处理连续变量。本文将PLE及其可学习映射接在TabM之前，并用两种标签训练互补分支。
+
+\subsection{条件因子模型与截面交互}
+因子模型把多只股票的共同变化与个体差异分开。Kelly等\cite{kelly2019}提出工具变量主成分分析（Instrumented Principal Component Analysis，IPCA），以可观察的公司特征解释随时间变化的潜在因子载荷。这一工作提示：特征既可以预测均值，也可以描述股票如何参与共同变化。本文沿用这种条件化思路，以神经网络生成收益分布参数。
+
+FactorVAE\cite{duan2022}将动态因子模型与变分自编码器（Variational Autoencoder，VAE）结合，以潜变量分布同时建模收益及不确定性。其先验与后验学习为低信噪比金融数据提供了一种概率建模思路。本文采用共同因子加个体扰动的结构，在高斯假设下解析边缘化潜变量，以联合似然直接学习条件均值与协方差。
+
+缩放点积注意力\cite{vaswani2017}根据查询与键的相似度聚合值向量。本文沿同一交易日的股票维度应用注意力，使个体表示能够利用当日其他成员的信息。注意力负责学习条件表示，风格与因子距离则负责定义后续的修正邻域。
+
+\subsection{关系排序与受限修正}
+Feng等\cite{feng2019}的关系股票排序模型（Relational Stock Ranking，RSR）将股票关系和时序信息结合，强调利用股票之间的联系学习相对名次。与其关系来源和时间图卷积结构不同，RH50以当日风格和学习到的载荷构造距离，并逐日更新邻域。
+
+RankNet\cite{burges2005}通过成对偏好的概率损失学习排序函数。本文采用局部邻域内的成对logistic损失，并按历史收益差距赋权。同时，逐点排名误差约束整体排序，保持惩罚限制修正幅度。模型先学习收益分布表示，再冻结表示训练修正头。
+
+\subsection{收缩估计与近期信息适应}
+岭回归通过二次惩罚约束系数，缓和特征相关性对估计的影响\cite{hoerl1970}。本文采用其带非零先验中心的形式：离线数据给出长期参照，当次窗口内已经实现的历史收益提供近期统计量，二者共同决定临时回归系数。该系数是固定推断规则对输入的响应，不写回持久模型。与重新训练神经网络相比，这一过程将适应限制在低维、闭式且受正则约束的计算内。
+
+本文的组合方式具有三个层次：以表格集成和条件因子邻域形成长期参考，以历史窗口统计补充近期信息，再以分层重排限制不同信号的作用区域。这些构件分别来自成熟的学习与统计思想；本文关注它们在同一时点约束和组合评价下如何协同，不将此结构视为对单一既有方法的直接复现。
+
+\section{方法：整体排序、近期适应与区域约束}
+\subsection{设计原则与结构分工}
+方法针对三个相互关联的困难。第一，短期收益噪声较大，单一函数结构可能遗漏不同形式的预测关系。第二，股票共享市场状态，而这些关系也会随时间变化。第三，全截面顺序与重要头寸选择对预测误差的敏感性不同：改进大量中低名次的比较，可能伴随少数高分股票的选择变动。
+
+图\ref{fig:architecture}给出完整结构。RH50主干将异构表格集成与条件因子邻域修正结合，产生参考分数$h_t$。新增路径从同次输入中重建近期历史，形成统计修正与上下文修正，产生更具近期适应性的排序。内层约束限制新增修正对其锚点高分区的改变；外层约束保留RH50前60名，其余股票使用增强排序。两层使用的参照不同，不能合并理解为一次加权平均。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rounded corners=3pt,align=center,text width=6cm,minimum height=1.15cm,inner sep=7pt},flow/.style={rh flow}]
+\node[bx,rh shared,text width=13.4cm] (input) at (0,0) {\textbf{当次可见的120日输入}\\行情、官方加工因子、风格与逐日股票池};
+\node[bx,rh base] (base) at (-3.7,-2) {\textbf{基础分支}\\异构表格模型、排名融合与轻度后处理};
+\node[bx,rh teacher] (aux) at (3.7,-2) {\textbf{辅助分支}\\条件因子表示、混合距离邻域、双修正头};
+\node[bx,rh fusion,text width=13.4cm] (ref) at (0,-4) {\textbf{冻结的整体排序主干}\\参考分数$h$用于选出头部；增强起点$q$用于统计增强};
+\node[bx,rh neighbor] (window) at (-3.7,-6) {\textbf{窗口统计与上下文修正}\\已实现标签的闭式回归 + 冻结神经头};
+\node[bx,rh fusion] (head) at (3.7,-6) {\textbf{RH50头部集合}\\按$h$选取前60只并保留相对顺序};
+\node[bx,rh correction] (inner) at (-3.7,-8) {\textbf{内层约束}\\以统计锚点限定增强信号的重排区域};
+\node[bx,rh fusion,text width=13.4cm] (out) at (0,-10) {\textbf{外层约束与完整输出}\\RH50头部居前；其余股票按内层输出重排};
+\foreach \n in {base,aux}{\draw[flow] (input.south -| \n.north)--(\n.north);\draw[flow] (\n.south)--(ref.north -| \n.south);}
+\foreach \n in {window,head}{\draw[flow] (ref.south -| \n.north)--(\n.north);}
+\draw[flow] (window)--(inner);\draw[flow] (inner.south)--(out.north -| inner.south);
+\draw[flow] (head.south)--(out.north -| head.south);
+\end{tikzpicture}
+\caption{完整推理结构。基础分支与辅助分支形成RH50主干；历史统计及上下文提供增强信息；两层约束分别决定增强信息可改变的区域。窗口输入同时用于主干的历史表示重建，图中省略这条重复数据连线。}\label{fig:architecture}
+\end{methodfigure}
+
+\subsection{基础分支：保留广泛的预测信息}\label{sec:baseargument}
+\paragraph{不同学习器对应不同函数结构。}
+基础分支包括LightGBM、普通TabM和两个带PLE数值嵌入的TabM。树模型通过分裂表达阈值与交互，TabM通过共享表示表达跨变量的非线性组合，PLE则使连续变量在不同数值区间具有更灵活的响应\cite{ke2017,gorishniy2025,gorishniy2022}。例如，一个成交指标可能只在极端区间有用，另一个指标可能需要与波动状态联合解释。不同函数结构有助于覆盖这些关系；当各模型保留有效信号且误差不完全一致时，集成有望改善预测稳定性。
+
+特征表示也采用类似的互补安排。同日排名减弱单位、尺度和部分极端值对输入的影响，原值副本保留排名无法表达的距离；短期平滑与变化分别描述状态持续性和近期调整。这使模型有机会区分相对位置相同但实际幅度不同的样本，同时保留排名的跨日期可比性。模型正则化用于限制相关副本带来的冗余拟合。
+
+\paragraph{两种标签区分整体收益与风格内差异。}
+LightGBM、普通TabM和一个PLE学习同日收益排名；另一个PLE学习去除十项风格线性解释后的收益残差排名。前者保留市场实际发生的整体收益顺序，后者强调不能由已知风格线性解释的部分。这一分工针对一种常见混淆：模型可能正确判断了某种风格更强，却未必能判断同类股票中谁更强。残差标签为后一种能力提供单独的监督来源。
+
+这里不把所有标签都残差化，因为风格相关的收益也可能具有预测价值，而且线性风险解释不完备。残差PLE仅占基础集成的5\%，作为补充而非替代。各日总训练权重相同，使优化目标与按日等权的平均RankIC更接近；中心化收益排名作为回归目标，降低极端收益幅度对基础训练的直接支配，但排名均方误差仍只是RankIC的可优化替代目标。
+
+\paragraph{集成与后处理采取有限干预。}
+先等权融合树模型与普通TabM的排名并重新排名，再将该组合与两个PLE排名按75\%、20\%、5\%融合。排名融合使原始输出尺度不同的学习器具有可比较的影响，避免某个模型仅因输出方差较大而主导结果。
+
+\begin{methodfigure}
+{\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rh base,rounded corners=3pt,align=center,inner sep=7pt,text width=2.6cm,minimum height=1.45cm},
+ flow/.style={rh flow},
+ lab/.style={fill=white,inner sep=3pt,align=center}]
+\node[bx,rh shared,text width=13cm,minimum height=1cm] (in) at (0,0)
+ {\textbf{相同的347维输入}\\同日排名描述相对位置；部分原值副本保留幅度};
+\node[bx] (tree) at (-5.25,-2.1) {\textbf{LightGBM}\\收益排名标签};
+\node[bx] (tab) at (-1.75,-2.1) {\textbf{普通TabM}\\收益排名标签};
+\node[bx] (ple) at (1.75,-2.1) {\textbf{PLE--TabM}\\收益排名标签};
+\node[bx] (res) at (5.25,-2.1) {\textbf{PLE--TabM}\\风格残差排名标签};
+\node[bx,text width=5.6cm,minimum height=1.0cm] (avg) at (-3.5,-4.15)
+ {前两者各占50\%\\融合各自排名，随后重新排名};
+\node[bx,text width=13cm,minimum height=1.0cm] (out) at (0,-6.1)
+ {\textbf{基础集成分数}\\融合整体收益信息与风格线性解释外的信息};
+\foreach \m in {tree,tab,ple,res}{\draw[flow] (in.south -| \m.north)--(\m.north);}
+\draw[flow] (tree.south)--(avg.north -| tree.south);
+\draw[flow] (tab.south)--(avg.north -| tab.south);
+\draw[flow] (avg.south)--node[lab,right]{75\%}(out.north -| avg.south);
+\draw[flow] (ple.south)--node[lab,right]{20\%\\先转排名}(out.north -| ple.south);
+\draw[flow] (res.south)--node[lab,right]{5\%\\先转排名}(out.north -| res.south);
+\end{tikzpicture}
+\caption{基础分支的层级集成。相同输入通过不同学习器和两种标签形成预测。LightGBM与普通TabM等权融合排名后重新排名，再与收益排名PLE和风格残差排名PLE按75\%、20\%、5\%融合。}\label{fig:basecomponents}
+\par}
+\end{methodfigure}
+
+
+基础分数随后接受轻度时间平滑和部分风格残差化。平滑主要作用于当前及前日的中间名次，最大前日权重为2.5\%，使邻近日期的微小排序变化受到有限抑制；尾部排名较少受到直接干预。风格残差化移除10\%的同日线性拟合分量，适度减少容易被共同风格解释的信号，同时保留大部分原排序。
+
+\begin{methodfigure}
+{\centering
+\begin{tikzpicture}[>=Latex,font=\small]
+\node[font=\small\bfseries] at (2.85,3.15) {（a）中间名次才接受平滑};
+\draw[->,draw=black!65] (0,0)--(6.1,0);
+\node[font=\footnotesize] at (3,-.65) {当日百分位排名};
+\draw[->,draw=black!65] (0,0)--(0,2.55);
+\node[anchor=west,font=\footnotesize] at (0,2.65) {前日分数权重};
+\draw[dashed,black!30] (0,2.1)--(3,2.1);
+\draw[rhBase,line width=1.5pt] (0,0)--(1.5,0)--(3,2.1)--(4.5,0)--(6,0);
+\foreach \x/\t in {0/0,1.5/0.25,3/0.50,4.5/0.75,6/1}{
+ \draw (\x,0)--(\x,-.08);\node[below,font=\footnotesize] at (\x,-.1) {\t};}
+\node[left,font=\footnotesize] at (0,2.1) {2.5\%};
+
+\node[font=\footnotesize,align=center] at (3,-1.4) {前日排名固定为0.50的函数切片\\两端权重为零，中间最大};
+
+\node[font=\small\bfseries] at (10.5,3.15) {（b）只移除10\%的风格分量};
+\node[rh base,rounded corners=3pt,text width=5.5cm,align=center,minimum height=.85cm] (q) at (10.5,2.2)
+ {输入分数 $q'=0.60$};
+\node[rh base,rounded corners=3pt,align=center,text width=2.45cm,minimum height=1.1cm] (v1) at (8.95,.95)
+ {拟合分量$+0.20$\\减去$0.02$};
+\node[rh base,rounded corners=3pt,align=center,text width=2.45cm,minimum height=1.1cm] (v2) at (12.05,.95)
+ {拟合分量$-0.20$\\加回$0.02$};
+\node[text=rhBase,font=\bfseries] (o1) at (8.95,-.35) {$b=0.58$};
+\node[text=rhBase,font=\bfseries] (o2) at (12.05,-.35) {$b=0.62$};
+\draw[rh flow] (q.south -| v1.north)--(v1.north);
+\draw[rh flow] (q.south -| v2.north)--(v2.north);
+\draw[rh flow] (v1)--(o1);\draw[rh flow] (v2)--(o2);
+\node[font=\footnotesize,align=center] at (10.5,-1.0) {调整方向取决于风格拟合值};
+\end{tikzpicture}
+\caption{基础分数的后处理。（a）前日排名为0.50时，平滑权重仅在中间名次非零；（b）部分风格残差化的数值示例，$b=q'-0.1\times\text{风格拟合分量}$，调整方向由拟合分量的正负决定。}\label{fig:gentlepost}
+\par}
+\end{methodfigure}
+
+\subsection{辅助分支：让个体预测具有截面背景}\label{sec:teacherargument}
+\paragraph{为何需要同日交互。}
+独立的逐股预测只能通过各自输入推断市场状态，而同一个变量的含义可能取决于其他股票的状态。例如，一只股票的成交活跃度上升，在全市场同步活跃与仅少数股票活跃时，可能对应不同情境。辅助网络利用当日输入的均值、标准差生成特征门控，再通过四头注意力聚合同日其他股票的表示\cite{vaswani2017}。前者提供整体背景，后者允许不同股票使用不同的比较对象。
+
+网络将347维输入压缩为32维表示，并结合自身、截面均值、截面标准差和自身减均值的表示。这种组合同时提供绝对状态和相对状态，交互范围限定为当日可见股票集合。
+
+\paragraph{为何同时学习均值与共同变化。}
+只用排名损失时，多种内部表示都可能产生相似的分数，却未必区分“共同冲击造成的相似”与“个体预测方向相同”。因此，辅助网络同时学习四个潜在共同因子的条件分布。对经过尺度化与截断的收益，模型给出
+\begin{equation}
+ m_t=\alpha_t+\Beta_t\mu_t,\qquad
+ \Sigma_t=D_t+U_tU_t^\top,\quad U_t=\Beta_t\diag(\sqrt{v_t}),
+ \label{eq:factor}
+\end{equation}
+其中$\alpha_t$为股票特有均值项，$\Beta_t$为因子载荷，$\mu_t,v_t$为共同因子的条件均值与方差，$D_t$为个体扰动的对角方差。潜在因子的含义由训练数据学习。
+
+训练同时使用排名均方误差（Mean Squared Error，MSE）与条件高斯负对数似然（Negative Log-Likelihood，NLL）。排名项要求最终分数保留顺序信息；似然中的二次型根据模型协方差衡量联合预测误差，使模型能够利用多只股票同步偏离所包含的共同变化信息。对数行列式项对扩大不确定性施加代价，避免仅靠增大方差降低误差项。四因子的低秩结构限制了协方差的自由度，并将主要线性求解缩小为$4\times4$矩阵。
+
+教师分数在该网络自身的排名头上增加一个有界的条件均值项：条件均值先除以预测标准差，再经双曲正切压缩。相同均值下，较高的预测不确定性对应较弱的分数修正；有界输出进一步限制分布分支对排序的直接影响。概率分支同时为后续邻域构造和修正提供共同载荷与不确定性特征。
+
+
+\begin{methodfigure}
+{\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rh teacher,rounded corners=3pt,align=center,inner sep=7pt,text width=3.45cm,minimum height=1.15cm},
+ flow/.style={rh flow}]
+\node[bx,rh shared] (x) at (-5,0) {\textbf{当日股票集合}\\个体特征 + 截面背景};
+\node[bx] (ctx) at (0,0) {\textbf{上下文编码}\\特征门控 + 股票注意力};
+\node[bx] (h) at (5,0) {\textbf{共享表示}$\ h$\\同时服务两个学习任务};
+\draw[flow] (x)--(ctx);\draw[flow] (ctx)--(h);
+\node[bx,text width=5.5cm] (rank) at (-3.65,-2.5) {\textbf{排名头}\\提供整体顺序的初始判断};
+\node[bx,text width=5.5cm] (dist) at (3.65,-2.5) {\textbf{条件因子分布}\\共同变化$UU^\top$ + 个体差异$D$};
+\draw[flow] (h.south)--(5,-1.2)--(-3.65,-1.2)--(rank.north);
+\draw[flow] (5,-1.2)--(3.65,-1.2)--(dist.north);
+\node[rh teacher,rh training,rounded corners=3pt,text width=5.5cm,align=center,inner sep=7pt] at (-3.65,-4.15)
+ {\textbf{训练约束：排名MSE}\\通过教师最终分数保持排序目标};
+\node[rh teacher,rh training,rounded corners=3pt,text width=5.5cm,align=center,inner sep=7pt] at (3.65,-4.15)
+ {\textbf{训练约束：高斯NLL}\\解释联合误差，并约束不确定性};
+\node[bx,text width=13cm,minimum height=1cm] at (0,-6.0)
+ {\textbf{共同形成冻结教师}\\向修正阶段提供初始分数、股票表示、共同载荷与不确定性统计};
+\end{tikzpicture}
+\caption{条件因子教师的联合学习。两种监督共享股票表示：排名MSE作用于包含有界均值项的教师分数，区分相对位置；高斯NLL约束收益幅度与联合变化。训练完成后，冻结教师向修正阶段提供分数、表示、共同载荷与不确定性统计，其中共同载荷用于构造邻域。}\label{fig:teacherroles}
+\par}
+\end{methodfigure}
+
+\subsection{以风险相近性选择更有意义的比较}\label{sec:neighborargument}
+\paragraph{共同载荷距离与相对收益的联系。}
+在式\eqref{eq:factor}的条件独立扰动假设下，两只股票变换后收益之差的条件方差满足
+\begin{equation}
+ \operatorname{Var}(\hat y_{i,t}-\hat y_{j,t}\mid X_t)
+ =D_{ii,t}+D_{jj,t}+\|U_{i,t}-U_{j,t}\|_2^2.
+ \label{eq:relativevariance}
+\end{equation}
+这一关系来自$\Sigma_{ii}+\Sigma_{jj}-2\Sigma_{ij}$：共同载荷越接近，共同因子对二者收益差的贡献越小。它为使用$U$的距离定义邻域提供了具体理由。直观上，若两只股票以相近方式受到同一冲击，比较它们的差异可以部分抵消这一冲击，使模型更关注个体条件均值与剩余信息。
+
+式\eqref{eq:relativevariance}中仍保留两个个体方差。因此，载荷距离仅描述相对收益风险的共同部分，完整风险还取决于个体扰动；本文以这一共同部分作为邻域构造的依据。
+
+\paragraph{为何结合已知风格与学习载荷。}
+仅使用学习到的$U$，邻域会完全依赖一个有噪声的模型；仅使用官方风格，又可能遗漏其未表达的共同变化。RH50分别计算十项风格暴露与四维$U$的平方距离，各按当日非退化距离的中位数归一化，再等权组合。独立归一化避免某一路纯粹因数值尺度较大而支配关系。风格提供外部于该网络估计过程、但仍来自允许数据的参照，潜在载荷提供由任务学习到的补充。
+
+每只股票选择不含自身的24个最近邻，距离更近的对象获得更高权重。这把比较集中在一个有限集合，避免局部损失被大量属性差异很大的股票对主导；加权聚合也减少了对单个邻居状态的依赖。邻居由当日特征和冻结教师确定，标签仅用于后续监督。注意力学习全截面表示，邻域则明确局部修正所针对的比较对象。
+
+\paragraph{为何同时输入自身、邻居与差值。}
+每只股票的节点表示为42维：32维隐藏状态，加上两种预测分数、两个风险标准化均值、对数总标准差、共同方差占比及4维共同载荷。它将个体状态、预测方向与共同变化汇总到同一个向量中。修正头接收自身节点表示、邻居加权表示及两者之差。自身表示保留个体信息，邻居表示给出比较背景，差值直接展示相对于同类的偏离。若两只股票的绝对指标都较高，但各自邻域的典型水平不同，相同绝对数值就可能对应不同修正。差值可由前两项线性恢复，显式提供它使小网络更容易表达相对比较；偏离的方向与作用由训练标签学习。
+
+
+\begin{methodfigure}
+{\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rh neighbor,rounded corners=3pt,align=center,inner sep=7pt,text width=2.65cm,minimum height=.8cm},
+ flow/.style={rh flow},
+ lab/.style={fill=white,font=\footnotesize,inner sep=2pt}]
+\node[align=center,font=\bfseries,text=rhNeighbor] at (-3.8,1.1) {（a）混合距离改变比较对象};
+\node[align=center,font=\bfseries,text=rhNeighbor] at (3.8,1.1) {（b）形成相对表示};
+\node[align=center] at (-3.8,-.7) {
+\begin{tabular}{crrr}\toprule
+候选 & 风格距离 & 载荷距离 & 混合距离\\\midrule
+A & 0.10 & 1.90 & 1.00\\
+\textbf{B} & \textbf{0.30} & \textbf{0.30} & \textbf{0.30}\\
+\textbf{C} & \textbf{0.50} & \textbf{0.70} & \textbf{0.60}\\\bottomrule
+\end{tabular}};
+\node[align=center,text width=6.4cm] at (-3.8,-2.75)
+ {只看风格：A最近\\两种距离各占一半：选择B、C\\邻居权重约为57.4\%、42.6\%};
+\node[bx,rh teacher,text width=5.6cm] (self) at (3.8,0)
+ {自身节点的某一维：$z_i=0.800$};
+\node[bx,rh teacher] (b) at (2.15,-1.5) {邻居B：$z_B=0.4$};
+\node[bx,rh teacher] (c) at (5.45,-1.5) {邻居C：$z_C=0.2$};
+\node[bx,text width=5.6cm] (avg) at (3.8,-3.1)
+ {加权邻居均值：$\bar z_i\approx0.315$};
+\draw[flow] (b.south)--node[lab,left]{57.4\%}(avg.north -| b.south);
+\draw[flow] (c.south)--node[lab,right]{42.6\%}(avg.north -| c.south);
+\node[bx,text width=13.3cm,minimum height=1.15cm] at (0,-5.0)
+ {\textbf{把三个视角拼接给修正头}\\
+ 自身$\ 0.800$\qquad 邻居$\ 0.315$\qquad 自身$-$邻居$\ 0.485$\\
+ 实际模型：$42+42+42=126$维，之后独立标准化};
+\end{tikzpicture}
+\caption{邻域构造的简化数值示例。风格与载荷距离等权组合，加入载荷距离可改变邻居选择；邻居权重按$\exp(-d)$归一化。修正输入拼接自身、邻居加权表示及两者之差。示例采用两个邻居和一维节点，实际模型使用24个邻居和42维节点。}\label{fig:neighbortoy}
+\par}
+\end{methodfigure}
+
+\subsection{有界修正：改善局部顺序而控制改动范围}\label{sec:correctionargument}
+\paragraph{冻结教师与零初始化限定学习任务。}
+完成条件因子训练后，网络被冻结，作为提供分数和表示的教师。每个修正头只有2049个可训练参数，其输出层从零初始化，训练起点与教师预测一致。第二阶段由此集中学习何时值得偏离已有判断。冻结教师还使邻域在该阶段保持固定，减少距离结构与配对目标同步变化带来的自由度；修正能力则受已有教师表示的限制。
+
+每个头先生成$u_{i,t}=0.05\tanh(f_{i,t})$，再减去当日均值形成增量$\delta_{i,t}$，修正后辅助分数为$a_{i,t}=g_{i,t}+\delta_{i,t}$。这里$g$是教师分数。去均值消除对截面排序无影响的公共平移。对于任意两只股票，
+\begin{equation}
+ (a_{i,t}-a_{j,t})-(g_{i,t}-g_{j,t})=u_{i,t}-u_{j,t},\qquad
+ |u_{i,t}-u_{j,t}|\leq0.1.
+ \label{eq:pairbound}
+\end{equation}
+因此，教师分数差严格大于0.1的股票对不会被单个头反转，等权平均两头仍满足这一界限。修正主要影响原分数接近的股票对。
+
+\paragraph{三个损失项对应三个不同要求。}
+修正头优化
+\begin{equation}
+ \mathcal L=\mathcal L_{\rm rank}
+           +\lambda\mathcal L_{\rm preserve}
+           +\eta\mathcal L_{\rm pair}.
+ \label{eq:loss}
+\end{equation}
+$\mathcal L_{\rm rank}$拟合中心化收益排名，要求局部调整后仍能描述整体截面；$\mathcal L_{\rm preserve}$惩罚有效监督样本上的增量平方，使新头只有在其他目标提供足够收益时才偏离教师；$\mathcal L_{\rm pair}$针对邻居间顺序施加logistic惩罚，使训练直接关注相近股票之间的相对判断。保持惩罚约束实际学习到的改动大小，有界输出约束可能的最大改动，两者作用不同。
+
+成对项按原始历史收益差距赋权，并设置上限。例如，两个配对都发生了同样的预测顺序错误，但真实收益分别只相差0.1\%与相差2\%，在其他权重相同时，后者应获得更大的训练影响。这样补回了纯排名标签丢失的幅度信息。上限避免极端收益差无限放大；逐日归一化则防止某个日期仅因有效配对更多而支配目标。标签无效的配对在损失中屏蔽，绝不据此改变当日可见股票集合。
+
+这三个目标相互制约：单独追求配对损失可能过度调整局部顺序，单独保持教师又限制了改进空间。排名误差与保持惩罚共同约束配对目标，使收益差距信息成为对既有排序的受限补充。
+
+
+\begin{methodfigure}
+{\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ item/.style={fill=white,inner sep=3pt,align=center},
+ loss/.style={rh correction,rh training,rounded corners=3pt,align=center,text width=3.9cm,minimum height=1.25cm,inner sep=7pt}]
+\node[font=\bfseries] at (-3.8,1.65) {（a）分数接近：可改变顺序};
+\node[font=\bfseries] at (3.8,1.65) {（b）分差大：保持原顺序};
+\foreach \x in {-5.7,1.9}{\node[font=\footnotesize,text=rhTeacher] at (\x,.85){教师分数（由高到低）};}
+\foreach \x in {-1.9,5.7}{\node[font=\footnotesize,text=rhCorrection] at (\x,.85){修正分数（由高到低）};}
+\node[item,text=rhTeacher] (b0) at (-5.7,0) {B：0.12};
+\node[item,text=rhTeacher] (a0) at (-5.7,-1.0) {A：0.10};
+\node[item,text=rhCorrection] (a1) at (-1.9,0) {A：0.13};
+\node[item,text=rhCorrection] (b1) at (-1.9,-1.0) {B：0.09};
+\draw[rh flow] (a0.east)--(a1.west);
+\draw[rh flow,dashed] (b0.east)--(b1.west);
+\node[item,text=rhTeacher] (d0) at (1.9,0) {D：0.25};
+\node[item,text=rhTeacher] (c0) at (1.9,-1.0) {C：0.00};
+\node[item,text=rhCorrection] (d1) at (5.7,0) {D：0.21};
+\node[item,text=rhCorrection] (c1) at (5.7,-1.0) {C：0.04};
+\draw[rh flow,dashed] (d0.east)--(d1.west);
+\draw[rh flow] (c0.east)--(c1.west);
+\node[font=\footnotesize,align=center] at (-3.8,-1.85) {A加0.03，B减0.03\\接近的判断可以被重新比较};
+\node[font=\footnotesize,align=center] at (3.8,-1.85) {D减0.04，C加0.04\\原分差超过0.1，无法被该头反转};
+\node[font=\bfseries] at (0,-3.05) {学习时：三个目标共同决定是否值得改动};
+\node[loss] at (-5,-4.35) {\textbf{排名误差}\\保持整体顺序的拟合};
+\node[loss] at (0,-4.35) {\textbf{保持惩罚}\\对偏离教师付出代价};
+\node[loss] at (5,-4.35) {\textbf{成对损失}\\重视邻居间的收益差距};
+\end{tikzpicture}
+\caption{有界修正的数值示例与训练目标。上部按名次排列四只假想股票，修正增量之和为零：接近的分数可以换序，超过0.1的原分差受到保护。下部为共同约束修正头的三项损失。}\label{fig:boundedexample}
+\par}
+\end{methodfigure}
+
+\subsection{双头与排名融合：汇总不同强度的判断}\label{sec:fusionargument}
+两个修正头分别使用保持系数$\lambda=2$与$\lambda=1$，其余主要配置相同，在参考路径中，预测分数等权平均。较强保持项偏向较小改动，较弱保持项允许更多局部适配；平均它们旨在降低输出对单一正则强度的依赖。两头共享教师、数据和随机种子，因此其预测误差可能高度相关。
+
+令$b_t,a_t$分别为基础分支和双头辅助分数，$R_t$为同日百分位排名，输出
+\begin{equation}
+ h_t=0.6R_t(b_t)+0.4R_t(a_t).
+ \label{eq:blend}
+\end{equation}
+分别排名后再融合，使两个分支以相同的序数尺度参与决策。基础分支保留跨全截面的广泛排序信息，辅助分支提供共同结构约束下的相对判断；当二者一致时最终偏好相互强化，发生分歧时则按60\%与40\%的固定权重折中。保留基础分支也降低了预测对条件分布及邻域假设的依赖。
+
+
+\begin{methodfigure}
+{\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rh correction,rounded corners=3pt,align=center,text width=3.9cm,minimum height=1.1cm,inner sep=7pt},
+ flow/.style={rh flow}]
+\node[bx] (two) at (-5,0) {\textbf{两个修正头}\\保持系数2与1};
+\node[bx] (avg) at (0,0) {\textbf{先平均分数}\\$a=(a^{(1)}+a^{(2)})/2$};
+\node[bx] (rank) at (5,0) {\textbf{再转辅助排名}\\$R_t(a)$};
+\draw[flow] (two)--(avg);\draw[flow] (avg)--(rank);
+\node[align=center,font=\small] at (0,-2.45) {
+\begin{tabular}{c >{\color{rhCorrection}}r >{\color{rhCorrection}}r >{\color{rhCorrection}}r >{\color{rhCorrection}}r >{\color{rhBase}}r >{\color{rhFusion}}r}\toprule
+股票 & 头1 & 头2 & 平均分数 & 辅助排名 & 基础排名 & 参考分数\\\midrule
+A & 0.10 & 0.12 & 0.11 & $1/3$ & $1$ & 0.7333\\
+B & 0.17 & 0.11 & 0.14 & $2/3$ & $1/3$ & 0.4667\\
+\textbf{C} & 0.15 & 0.19 & 0.17 & $1$ & $2/3$ & \textbf{0.8000}\\\bottomrule
+\end{tabular}};
+\node[rh fusion,rounded corners=3pt,align=center,text width=13cm,inner sep=7pt] at (0,-5.0)
+ {\textcolor{rhFusion}{\textbf{参考融合：C $>$ A $>$ B}}\\
+ \textcolor{rhBase}{60\%基础排名}\quad +\quad\textcolor{rhCorrection}{40\%辅助排名}\\
+ 基础分支最偏好A，辅助分支最偏好C，融合后C排在首位};
+\end{tikzpicture}
+\caption{双头与两分支融合的三股票数值示例。双头先在分数空间等权平均，汇总不同保持强度下的判断；基础与辅助分支再分别转为百分位排名，以统一尺度按60\%与40\%融合。RH50参考分数为$0.6\times\text{基础排名}+0.4\times\text{辅助排名}$。}\label{fig:fusionexample}
+\par}
+\end{methodfigure}
+
+
+\subsection{历史窗口：只利用当前已经实现的收益}\label{sec:windowtime}
+\paragraph{为何增加近期统计。}
+冻结网络将较长训练期内的规律压缩到参数中，能够提供稳定的参考，但不能保证某个特征在近期仍具有相同的预测方向。本文在固定表示上增加低维统计路径，询问一个更局部的问题：在当前能够观察到的最近若干次预测中，哪些特征与随后实现的相对收益一致？这一信息只用于受限修正，不重新估计完整神经网络。
+
+在信号日$t$收盘时，历史标签$y_{i,s}$只有在$s+2\leq t$时才完全可见。因此取
+\begin{equation}
+ \mathcal W_t=\{t-21,\ldots,t-2\},\qquad |\mathcal W_t|=20.
+ \label{eq:windowdates}
+\end{equation}
+最新可用标签的入场价格为$O_{i,t-1}$、退出价格为$O_{i,t}$。$t-1$和$t$的目标标签尚未实现，不能进入统计量。这里的日均指市场交易日，停牌与缺失价格按标签规则屏蔽。图\ref{fig:timeline}说明信息边界。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small]
+\fill[rhNeighbor!7] (-7,-.45) rectangle (1.55,.65);
+\fill[black!5] (1.55,-.45) rectangle (7,.65);
+\draw[rh flow] (-7,0)--(7,0);
+\foreach \x/\lab in {-6/{t-21},-3/{t-2},-1/{t-1},1/{t},3.5/{t+1},6/{t+2}}{
+ \draw (\x,-.1)--(\x,.1);\node[below] at (\x,-.1) {$\lab$};}
+\node[above,text=rhNeighbor] at (-3,.7) {最近20个已实现标签的信号日期};
+\draw[<->,draw=rhNeighbor,line width=1pt] (-6,1.35)--(-3,1.35);
+\node[above,font=\footnotesize] at (-4.5,1.35) {$s=t-21,\ldots,t-2$};
+\draw[<->,draw=rhTeacher,line width=1.2pt] (-1,-1.2)--(1,-1.2);
+\node[below,align=center,text=rhTeacher] at (0,-1.2) {最新成熟标签$y_{t-2}$\\$O_{t}/O_{t-1}-1$：已知};
+\draw[<->,draw=rhFusion,dashed,line width=1pt] (3.5,-1.2)--(6,-1.2);
+\node[below,align=center,text=rhFusion] at (4.75,-1.2) {当前目标$y_t$\\$O_{t+2}/O_{t+1}-1$：未知};
+\draw[dashed,draw=black!50] (1.55,-2.6)--(1.55,2.0);
+\node[align=center,font=\footnotesize] at (3.5,1.2) {在$t$收盘形成分数\\不越过当前信息边界};
+\end{tikzpicture}
+\caption{信号日期与收益实现日期的区别。上方标出20个历史信号日，下方用开盘到开盘的区间表示标签。当前可用的最新标签属于$t-2$，不是$t$；图中水平距离为示意，不按实际交易日数量等比例绘制。}\label{fig:timeline}
+\end{methodfigure}
+
+所有历史特征都在各自信号日期构造，使用当时的成员集合；当前统计量则在标签已经实现后汇总这些历史记录。二者解决不同的时间对齐问题。每次调用只依赖当前传入窗口，不保存跨日状态，也不因某只股票未来标签缺失而将其从历史特征计算的成员集合中删除。
+
+\subsection{低维统计表示与带先验的闭式修正}\label{sec:ridge}
+\paragraph{两套表示对应两类补充信息。}
+统计路径不直接回归全部347个输入，而使用22维和30维两套表示，控制短窗口内的估计自由度。22维表示包含9项风格、6项财务估值以及7项量价变量。财务估值为市盈率、市净率、净资产收益率、总资产收益率、资产负债率与流通市值；量价变量为单日收益、日内收益、隔夜收益、5日和20日波动、20日成交额比与换手率比。相对原始25维候选集合，这一路径不含官方动量、5日累计收益及20日累计收益。这只是统计分支的输入选择，基础模型仍可能使用这些信息。
+
+30维表示在上述22维上增加8项条件因子统计：教师分数、其原排名头分数、个体均值与共同均值各自除以总标准差的比值，以及4维共同载荷$U$。前者主要描述可观察的股票属性；后者进一步询问近期收益是否支持冻结网络所给出的条件判断。各列按当时完整成员集合计算百分位并减去截面均值，非有限值以零处理。新增线性路径不包含全部32维隐藏状态，但隐藏状态仍参与邻域神经路径。
+
+\paragraph{以极端相对胜负为统计目标。}
+令$u_{i,s}$为有效历史收益的百分位减去其截面均值。22维回归只选取$|u_{i,s}|\geq0.45$的样本，并令目标$\xi_{i,s}=\tfrac12\operatorname{sign}(u_{i,s})$。在无并列的典型截面中，这对应两端各约5\%的股票。该变换突出明显的相对胜负，同时降低极端收益数值对回归的直接影响；代价是舍弃中间股票的监督信息。
+
+30维路径先从$u_{i,s}$中减去0.1倍教师分数的中心化百分位，再在有效标签集合内重新排名、去均值和选取两端。它侧重教师原判断之外的相对顺序。此处“残差化”是对排名目标的有限调整，并不等价于去除了全部风险或全部教师信息。
+
+\paragraph{长期参照与短期证据的收缩结合。}
+令$x_{i,s}\in\R^d$为统计表示，$d\in\{22,30\}$，$\mathcal E_s$为有效且入选的极端样本集合，$n_s=|\mathcal E_s|$。按日计算
+\begin{equation}
+ A_s=\frac1{n_s}\sum_{i\in\mathcal E_s}x_{i,s}x_{i,s}^{\top},\qquad
+ b_s=\frac1{n_s}\sum_{i\in\mathcal E_s}x_{i,s}\xi_{i,s}.
+ \label{eq:windowstats}
+\end{equation}
+空集合使用零统计。$A_s$描述特征间的二阶关系，$b_s$描述特征与近期胜负的关系。每日先归一化，再按半衰期20日的指数权重$w_{s,t}\propto2^{-((t-2)-s)/20}$汇总，且$\sum_sw_{s,t}=1$，避免某天仅因入选股票较多而支配估计。
+
+设$\beta_0$为训练期估计的固定先验系数，$P$为固定正定惩罚矩阵，临时系数等价于最小化
+\begin{equation}
+ \sum_{s\in\mathcal W_t}\frac{w_{s,t}}{n_s}
+ \sum_{i\in\mathcal E_s}(\xi_{i,s}-x_{i,s}^{\top}\beta)^2
+ +(\beta-\beta_0)^{\top}P(\beta-\beta_0).
+ \label{eq:ridgeobj}
+\end{equation}
+空集合的目标项约定为零。其闭式解为
+\begin{equation}
+ \widehat\beta_t=\left(\sum_sw_{s,t}A_s+P\right)^{-1}
+ \left(\sum_sw_{s,t}b_s+P\beta_0\right).
+ \label{eq:ridge}
+\end{equation}
+实现通过线性方程求解，不显式形成逆矩阵。惩罚矩阵包含风格方向0.7、其余方向0.1的对角项，以及强度0.1的训练期特征变化协方差项。后者对历史变化较大的线性方向增加收缩；先验与该矩阵都不从评测期重新估计。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rounded corners=3pt,align=center,text width=6cm,minimum height=1.2cm,inner sep=7pt}]
+\node[bx,rh shared] (prior) at (-3.7,0) {\textbf{训练期固定量}\\先验$\beta_0$、惩罚矩阵$P$、窗口规则};
+\node[bx,rh neighbor] (recent) at (3.7,0) {\textbf{当次窗口统计}\\$A_s$：特征关系；$b_s$：特征与胜负关系};
+\node[bx,rh correction,text width=13.4cm] (solve) at (0,-2.1) {\textbf{受约束的临时系数}\\近期证据支持偏离先验时才产生明显变化};
+\draw[rh flow] (prior.south)--(solve.north -| prior.south);
+\draw[rh flow] (recent.south)--(solve.north -| recent.south);
+\node[bx,rh correction,text width=13.4cm] (delta) at (0,-4.1) {\textbf{只输出相对先验的增量}\\$d_{i,t}=0.15\tanh\!\left(x_{i,t}^{\top}(\widehat\beta_t-\beta_0)/0.15\right)$};
+\draw[rh flow] (solve)--(delta);
+\node[align=center,font=\footnotesize] at (0,-5.35) {一维示例：$A=0.1,\ P=0.3,\ \beta_0=0.2,\ b=0.08$\\无惩罚解为$0.8$；带先验解为$(0.08+0.3\times0.2)/(0.1+0.3)=0.35$};
+\end{tikzpicture}
+\caption{窗口统计如何与长期先验结合。底部的一维假想示例说明收缩作用：近期数据倾向于更大的系数，但固定先验限制变化。实际模型在22维和30维空间分别求解，统计量及临时系数在每次调用后丢弃。}\label{fig:ridge}
+\end{methodfigure}
+
+当前股票的修正由图\ref{fig:ridge}中的有界增量给出，分别记为$d^{22}_t,d^{30}_t$。相对先验的差值强调近期相对于长期关系的偏离，双曲正切函数限制单条统计路径的加性分数变化。它没有约束最终名次最多移动多少位：当分数密集时，小幅分数变化也可能改变多个名次。
+
+临时系数$\widehat\beta_t$随输入变化，固定的是先验、正则和计算规则。整个过程没有梯度更新，不修改存储权重，也不读取窗口之外的评测历史。本文采用提交文档及组织方对这一固定规则闭式计算的澄清所允许的推理范围\cite{competition}，不将该范围扩展为任意在线重训。
+
+\subsection{上下文神经修正：学习何时使用近期信息}\label{sec:context}
+线性统计可以描述某些特征近期倾向于哪种方向，却不能充分表达这一方向如何随个体条件和市场状态改变。为此，模型在原126维邻域表示之外增加52维上下文，由一个冻结的小型神经网络学习条件化修正。
+
+52维上下文由三部分组成：22维股票统计表示$x^{22}_{i,t}$、22维逐元素贡献$x^{22}_{i,t}\odot\widehat\beta^{\rm ctx}_t$，以及8维市场状态。符号$\odot$表示逐元素相乘；每一维贡献将“股票处于什么位置”与“近期这一特征的估计方向”结合。上下文系数$\widehat\beta^{\rm ctx}_t$使用相同的20日成熟标签窗口，但采用零先验和固定对角惩罚，不包含前述稳定性协方差项。
+
+市场状态包括收盘收益、日内收益和隔夜收益的截面均值与标准差，上涨比例减去0.5，以及截面平均收盘收益的5日均值。它们描述整体方向、分化程度与近期背景，只使用当时已知的行情。相同的个体贡献在市场普涨和高度分化时，可能需要不同的解释。
+
+统计增强路径使用双头的轻微非等权组合
+\begin{equation}
+ a_t^*=0.475a_t^{(1)}+0.525a_t^{(2)},\qquad
+ q_t=0.6R_t(b_t)+0.4R_t(a_t^*).
+ \label{eq:qstart}
+\end{equation}
+$h_t$仍按式\eqref{eq:blend}的等权双头定义，用于最终头部选择；$q_t$仅作为增强路径起点。令上下文头对辅助分数的增量为$\delta^{\rm ctx}$，该增量作用于$a^*$后，以图\ref{fig:context}所示的排名差$\Delta_t^{\rm NN}$加入增强分数。这样保留了原有基础与辅助分支的尺度约定。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rounded corners=3pt,align=center,text width=3.8cm,minimum height=1.25cm,inner sep=7pt}]
+\node[bx,rh teacher] (peer) at (-5,0) {\textbf{邻域结构：126维}\\自身、邻居、两者差值};
+\node[bx,rh neighbor] (contrib) at (0,0) {\textbf{个体与贡献：44维}\\$x^{22}$与$x^{22}\odot\widehat\beta^{\rm ctx}$};
+\node[bx,rh neighbor] (state) at (5,0) {\textbf{市场状态：8维}\\整体方向、波动与分化};
+\node[bx,rh correction,text width=13.3cm] (nn) at (0,-2.2) {\textbf{冻结的非线性映射：$178\rightarrow128\rightarrow1$}\\训练期标准化、ReLU、$0.05\tanh$、截面去均值};
+\foreach \n in {peer,contrib,state}{\draw[rh flow] (\n.south)--(nn.north -| \n.south);}
+\node[bx,rh correction,text width=13.3cm] (out) at (0,-4.2) {\textbf{从辅助分数变化转成排名变化}\\$\Delta^{\rm NN}=0.4\,[R_t(a^*+\delta^{\rm ctx})-R_t(a^*)]$};
+\draw[rh flow] (nn)--(out);
+\node[font=\footnotesize,align=center] at (0,-5.45) {离线目标：整体排名误差 + 增量保持惩罚 + 收益差距加权的邻域配对损失};
+\end{tikzpicture}
+\caption{上下文神经头的输入与输出。近期统计以特征贡献的形式进入冻结网络，而非改写网络权重。输出先修正辅助分数，再转换为同日百分位的差；0.05限制的是去均值前的原始头输出，不是最终名次变动。}\label{fig:context}
+\end{methodfigure}
+
+该头为$178\to128\to1$网络，共23041个参数，采用整流线性单元ReLU，即$\max(0,x)$。输入用训练统计量标准化并截断至$[-8,8]$；输出经$0.05\tanh$后去截面均值，记为$\delta^{\rm ctx}$。学习目标沿用式\eqref{eq:loss}的三部分：排名误差、系数2的保持惩罚，以及系数0.2的收益差距加权邻域成对损失。它没有直接优化组合IR，收益与风险的联系来自表示、邻域和受限调整。
+
+
+\subsection{两层受约束重排：区分信息提取与使用区域}\label{sec:ranking}
+\paragraph{内层约束保留统计锚点的高分区域。}
+定义锚点$k_t=q_t+d_t^{22}$与增强候选$c_t=q_t+d_t^{30}+\Delta_t^{\rm NN}$。前者仅依赖可观察属性的统计修正；后者还吸收条件因子统计与非线性上下文。令
+\begin{equation}
+ \mathcal L_t=\{i:R_t(k_{i,t})\leq0.8\}.
+ \label{eq:innerregion}
+\end{equation}
+对$\mathcal L_t$内股票按$c_t$重新排序，并按此顺序重新分配该集合原有的锚点名次数值；集合外保持锚点名次不变，得到$v_t$。这相当于在固定的低分名次槽位中重新安排股票，禁止候选分数将它们直接提升到锚点保护区。并列值按稳定规则处理，因此百分位阈值并不保证恰好选中80\%的股票。
+
+\paragraph{外层约束保持参考信号的头部名单与顺序。}
+根据$h_t$降序、股票代码升序选取前$K=\min(60,N_t)$只股票，形成$\mathcal H_t$；其余股票为$\mathcal T_t=\mathcal U_t\setminus\mathcal H_t$。令$\operatorname{arank}_{\mathcal S}$表示集合内的升序平均并列秩，最终输出
+\begin{equation}
+ s_{i,t}=\begin{cases}
+ (N_t-K+\operatorname{arank}_{\mathcal H_t}(h_{i,t}))/N_t,& i\in\mathcal H_t,\\[2pt]
+ \operatorname{arank}_{\mathcal T_t}(v_{i,t})/N_t,& i\in\mathcal T_t.
+ \end{cases}
+ \label{eq:finalrank}
+\end{equation}
+因此，参考头部全部排在其余股票之前，头部名单与相对顺序得到保留；其余股票使用增强路径的相对顺序。典型300只股票的截面中，前60只固定，另外240只允许重新排序。最终分数是分层名次表示，不是对原始分数的简单线性混合，也不保留原始分数间距。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small]
+\node[text=rhCorrection,font=\bfseries] at (0,.4) {（a）内层：在锚点留下的名次槽位内重排};
+\node[align=center] at (0,-1.15) {
+\begin{tabular}{lcccccc}\toprule
+从高到低的位置 & 1 & 2 & 3 & 4 & 5 & 6\\\midrule
+锚点排序 & \textbf{A} & \textbf{B} & C & D & E & F\\
+候选排序 & F & A & D & C & B & E\\
+内层输出 & \textbf{A} & \textbf{B} & F & D & C & E\\\bottomrule
+\end{tabular}};
+\node[font=\footnotesize,align=center] at (0,-2.55) {锚点保护A、B；仅将C、D、E、F按候选顺序填回第3--6位};
+\node[text=rhFusion,font=\bfseries] at (0,-3.6) {（b）外层：按另一个参考信号重新确定头部};
+\node[align=center] at (0,-5.2) {
+\begin{tabular}{lcccccc}\toprule
+从高到低的位置 & 1 & 2 & 3 & 4 & 5 & 6\\\midrule
+RH50参考排序 & \textbf{C} & \textbf{A} & B & D & E & F\\
+上方内层输出 & A & B & F & D & C & E\\
+最终排序 & \textbf{C} & \textbf{A} & B & F & D & E\\
+最终分数 & $1$ & $5/6$ & $4/6$ & $3/6$ & $2/6$ & $1/6$\\\bottomrule
+\end{tabular}};
+\end{tikzpicture}
+\caption{六只假想股票的连续重排示例。为便于展示，内层保护锚点前2只、外层保留参考前2只；实际内层阈值为0.8，外层数量为60。内层保护A、B，外层却选择C、A，说明两层集合可以不同。最终其余股票按内层输出顺序排列。}\label{fig:ranktoy}
+\end{methodfigure}
+
+\paragraph{机制能够保证什么。}
+式\eqref{eq:finalrank}精确保证头部集合及其相对顺序，而不直接保证组合权重或IR。如果下游仅按前若干名等权持有，且该数量不超过60，同名单同顺序可保持该选股规则的输出；如果优化器使用分数幅度、风险约束或更多候选股票，头部保持不足以保证组合相同。本文将这一结构解释为限制决策扰动的机制，其经济作用仍需在具体组合规则下检验。
+
+两层约束也存在机会成本：内层候选可能正确识别了本应进入高分区的股票，外层参考头部也可能发生失效。保护限制了这些潜在改进。因此，它是一种明确的偏差与稳定性取舍，而非对全部市场状态的最优性保证。
+
+\subsection{模块之间的互补关系}
+基础学习器覆盖广泛的非线性预测关系；条件因子网络描述同日共同变化；混合邻域把比较集中到相近股票；有界双头限制局部改动。历史窗口统计进一步提供近期特征与已实现收益的联系，上下文头学习这些联系在个体和市场条件下的使用方式。最终分层重排将“获得更多排序信息”与“允许改动哪些重要决策”区分开来。
+
+整条链条同时受到信息和自由度约束。标签必须已经实现，历史表示使用历史成员；回归围绕固定先验收缩，神经增量有界；排序调整还被限制在指定区域。上述约束各自处理不同风险，不能相互替代，也不构成泛化性能的理论保证。
+
+\section{实验与结果}
+\subsection{研究设计与评价范围}
+本地验证按年份向前推进。评价2019--2022年中的每一年时，训练标签的退出端点严格早于该年；预处理、条件因子网络、修正头及统计先验遵循同一截止边界。部署模型另用允许的2016--2022年公开数据训练，标签退出上限为2022年12月30日。部署模型与年度验证模型用途不同，不能用部署模型在其训练年份的预测代替年度时间验证。
+
+2019--2022年已经参与模型开发和选择，其中2022年也属于已观察区间。本地结果由保存的年度模型预测及固定回测配置计算。公开和私有评测成绩来自归档的参赛反馈；隐藏日期、逐日收益、持仓及完整组合配置未披露。因此，本节分别报告三类结果，不将它们拼接为同一收益序列，也不把不同环境下的IR直接比较为改善幅度。
+
+\subsection{固定的本地组合配置}
+本地回测以官方SDK中的Barra约束组合为对象，采用表\ref{tab:portfolio}的统一设置。主动权重指单只股票权重与基准权重之差；行业和风格暴露偏离限制组合相对基准的共同属性差异。这些约束意味着分数最高的股票未必获得最高权重，分数变化也未必转化为实际交易。
+
+\begin{table}[htbp]\centering\small
+\caption{本地组合评价口径，所有比较使用相同设置。}\label{tab:portfolio}
+\begin{tabularx}{\linewidth}{lX}\toprule
+项目 & 设置\\\midrule
+资金与交易 & 初始资金100万元，每交易日调仓，持有周期$H=1$，复权开盘价成交。\\
+持仓约束 & 仅做多、满仓；单股权重上限10\%，主动权重偏离上限1\%。\\
+风险与换手 & 行业和风格暴露偏离上限各2\%；SDK换手约束参数为1.0。\\
+成本 & 佣金0.0003、滑点0.0002，买卖双向按各自成交额计算；无最低佣金或额外税费。\\
+IR & 按式\eqref{eq:ir}计算，年化交易日数252。\\\bottomrule
+\end{tabularx}
+\end{table}
+
+此成本情景每单位成交额计5个基点，1个基点等于0.01\%。它是统一的本地研究设定，并非对隐藏平台费率的推定。比较中不改变评价区间、费用或约束。
+
+\subsection{整体排序与年度组合表现}
+表\ref{tab:local}比较三个信号：RH50参考主干、带内层保护的统计增强信号$v_t$，以及进一步加入外层头部保持的FNR$s_t$。连续RankIC覆盖2019年1月2日至2022年12月28日的970个有效日期。年度IR分别计算，不能简单平均为整个四年区间的IR。
+
+\begin{table}[htbp]\centering\small
+\caption{本地开发区间结果。统计增强对应K3\_R80；FNR为最终模型。}\label{tab:local}
+\begin{tabular}{lrrr}\toprule
+指标 & RH50参考 & 统计增强 & FNR\\\midrule
+连续Mean RankIC & 0.085032 & 0.089228 & 0.088717\\
+2019年IR & 8.2951 & 8.8834 & 9.0078\\
+2020年IR & 4.7434 & 5.4053 & 5.3513\\
+2021年IR & 2.5842 & 2.9850 & 2.7407\\
+2022年IR & 3.2551 & 3.4317 & 3.5383\\\bottomrule
+\end{tabular}
+\end{table}
+
+FNR相对RH50的连续平均RankIC提高0.003685，四个年度的IR均提高。相对统计增强信号，FNR牺牲约0.000510的RankIC，在2019年和2022年获得更高IR，在2020年和2021年则较低。这说明头部保持没有在全部本地指标上支配统计增强；其作用是改变信号使用范围，而非无成本地提高所有目标。
+
+\subsection{公开与私有评测}
+表\ref{tab:public}报告相同三类结构的公开评测反馈。统计增强的RankIC高于RH50，但IR较低；FNR保留大部分RankIC增益，同时报告的IR与RH50相同，公榜总成绩排名第2。这个模式与“新增排序信息主要用于其余区域、头部选择继续沿用参考信号”的设计一致。但在缺少隐藏持仓与逐日收益时，不能据此确定IR变化来自某只股票、某项风格或某类交易成本。
+
+\begin{table}[htbp]\centering\small
+\caption{归档公开评测反馈。数值按反馈精度报告。}\label{tab:public}
+\begin{tabular}{lrr}\toprule
+模型 & Mean RankIC & 组合IR\\\midrule
+RH50参考 & 0.0832 & 5.5684\\
+统计增强 & 0.0852 & 4.1484\\
+FNR & 0.0850 & 5.5684\\\bottomrule
+\end{tabular}
+\end{table}
+
+FNR的私有评测反馈为\textbf{RankIC 0.0825、IR 5.2132，总成绩排名第一}。这提供了一次未用于该版本选择的隐藏评价结果。相对于其公开反馈，RankIC与IR分别低0.0025和0.3552；由于两类评测的具体时间与组合设置未公开，这一差异不能单独识别过拟合的程度。私榜表现支持模型在本次额外评价中的有效性，但不等于在任意未来时段或交易条件下都有同样表现。
+
+\subsection{内层保护的受控消融}
+为检验内层保护的作用，固定外层RH50前60名、全部训练权重、输入特征、窗口参数及组合配置，只将其余股票的排序依据从$v_t$改为未保护的增强候选$c_t$。该比较只改变信号使用方式，不重新训练其他模块。
+
+\begin{table}[htbp]\centering\small
+\caption{去除内层保护的本地消融。差值为消融减FNR。}\label{tab:ablation}
+\begin{tabular}{lrrr}\toprule
+指标 & FNR & 去除内层保护 & 差值\\\midrule
+连续Mean RankIC & 0.08871720 & 0.08868535 & $-0.00003185$\\
+2019年IR & 9.0078 & 9.4470 & $+0.4392$\\
+2020年IR & 5.3513 & 5.6134 & $+0.2621$\\
+2021年IR & 2.7407 & 2.7065 & $-0.0342$\\
+2022年IR & 3.5383 & 3.5608 & $+0.0224$\\\bottomrule
+\end{tabular}
+\end{table}
+
+消融平均每天改变23.66只股票的名次分数；972个输入日期中，前60名及其顺序保持不变。其RankIC差异很小，三年IR提高、一年降低。缺少显著性检验时，该结果不能证明内层保护具有普遍优势。它同时说明，在本地风险约束优化器下，即便高分区域顺序不变，其他分数的变化仍能影响组合IR，符合第\ref{sec:ranking}节对机制边界的分析。
+
+\section{局限与讨论}
+\paragraph{排序与组合目标尚未统一。}
+模型通过收益差距加权、风险邻域与头部保持，间接考虑预测误差的经济影响，但没有将持仓、交易费用与组合IR直接纳入训练目标。全截面RankIC对每只股票的排序误差进行统一评价，实际投资组合则赋予不同股票不同权重。这种目标差异没有被结构完全消除。要解释IR改善，还需观察主动收益、跟踪误差、持仓集中度、换手及极端日期，而现有隐藏反馈不包含这些信息。
+
+\paragraph{短窗口适应与估计噪声。}
+20个交易日的截面记录包含多只股票，但共同风险使它们不是独立样本，不能将“日期数乘股票数”视为有效独立样本量。极端区域目标又减少了监督覆盖；其阈值、半衰期和先验强度都可能对市场状态敏感。收缩与限幅降低近期噪声被放大的可能性，却也可能压制真实的新关系。未来应固定模型后比较不同状态下的统计系数稳定性和预测误差，而非仅依据整体平均结果选择窗口。
+
+\paragraph{潜在因子与邻域的解释边界。}
+四因子高斯模型和条件独立的个体扰动是近似假设。共同载荷可以帮助定义比较对象，但不意味着已经识别出具有因果含义的经济因素；风格距离与载荷距离也不包含全部相对风险。收益截断和高斯似然对尾部事件的刻画有限，概率输出尚未经过独立校准检验。教师与后续修正头使用同一训练期，历史表示还可能包含样本内拟合倾向。
+
+\paragraph{头部保护依赖参考信号与组合规则。}
+固定60只股票的边界在典型300只截面中约占20\%，但其合理性并不由数学结构自动保证。参考头部失效时，外层保护会阻止增强信号替换它；高分区外的信息也可能经风险优化影响持仓。相同公开IR只能说明报告值相同，不能证明逐日组合路径相同。消融结果进一步提示，内层保护的收益应按具体时段和组合配置判断。
+
+\paragraph{选择偏差与外部有效性。}
+开发区间及公开榜单曾反复用于模型选择。回测过拟合与自适应复用反馈会使被选中的指标偏乐观\cite{bailey2014,adaptive}；冻结部分权重或增加结构约束不能消除这一选择过程的影响。私有评测提供了额外证据，但这里只有一次最终反馈，没有足够信息估计其置信区间或不同市场条件下的胜率。后续检验应预先固定方案，在未参与选择的新时间区间评价，并将统计不确定性与平均收益一并报告。
+
+此外，官方加工因子的上游时点定义依赖数据提供方，历史训练与部署对特别处理状态字段的处理也存在差异：特别处理（Special Treatment，ST）指交易所对异常上市公司实施的风险警示，部署输入按平台约定将该字段置零。此差异及具体预处理见附录，不能把本研究结果直接推广到未经一致处理的数据源。
+
+\paragraph{模块归因尚不完整。}
+现有受控消融只分离了内层保护，尚不足以独立量化近期统计、特征删除、先验惩罚、上下文头及外层边界的贡献。FNR与统计增强之间还涉及参考头部的替换，因此不能将全部差异归因于某一个因子。进一步研究需要固定评价口径，开展组件移除、边界扰动和按市场状态分组的分析，区分可重复效应与特定区间的偶然结果。
+
+\section{结论}
+本文将短期股票预测分解为整体排序、近期关系适应和信号使用区域三个相互连接的问题。RH50主干利用表格集成与条件因子邻域形成参考排序；已实现标签的窗口统计补充近期特征方向，上下文神经头学习其条件化使用方式；两层重排约束则限制新增信息对高分区域的扰动。在固定本地配置下，FNR相对RH50提高平均RankIC及四个年度的IR，并在私有评测中取得RankIC 0.0825、IR 5.2132和总成绩第一。该结果支持区分全截面信息提取与重要排序区域稳定性的研究方向，同时保留了对选择偏差、组件贡献和跨环境适用性的明确限制。
+
+\begin{thebibliography}{99}\small
+\setlength{\itemsep}{0pt}\setlength{\parsep}{0pt}\linespread{1.0}\selectfont
+\bibitem{competition} CSI 300 Index Enhancement Challenge. \emph{Problem; Competition Rules; Submission Guide; Data README}. 官方赛题、规则与数据文档（比赛随附版本）。\href{https://datatech.geekpie.club/c/csi300-2026/leaderboard}{比赛公开榜单}。
+\bibitem{gu2020} Gu S, Kelly B, Xiu D. Empirical Asset Pricing via Machine Learning. \emph{The Review of Financial Studies}, 33(5):2223--2273, 2020. \href{https://doi.org/10.1093/rfs/hhaa009}{doi:10.1093/rfs/hhaa009}; \href{https://dachxiu.chicagobooth.edu/download/ML_BKP.pdf}{作者公开稿}.
+\bibitem{ke2017} Ke G, Meng Q, Finley T, et al. LightGBM: A Highly Efficient Gradient Boosting Decision Tree. \emph{Advances in Neural Information Processing Systems}, 30, 2017. \href{https://proceedings.neurips.cc/paper_files/paper/2017/hash/6449f44a102fde848669bdd9eb6b76fa-Abstract.html}{原文}.
+\bibitem{grinsztajn2022} Grinsztajn L, Oyallon E, Varoquaux G. Why Do Tree-Based Models Still Outperform Deep Learning on Typical Tabular Data? \emph{Advances in Neural Information Processing Systems}, 35, 2022. \href{https://proceedings.neurips.cc/paper_files/paper/2022/hash/0378c7692da36807bdec87ab043cdadc-Abstract-Datasets_and_Benchmarks.html}{原文}.
+\bibitem{gorishniy2025} Gorishniy Y, Kotelnikov A, Babenko A. TabM: Advancing Tabular Deep Learning with Parameter-Efficient Ensembling. \emph{International Conference on Learning Representations}, 2025. \href{https://arxiv.org/abs/2410.24210}{arXiv:2410.24210}.
+\bibitem{gorishniy2022} Gorishniy Y, Rubachev I, Babenko A. On Embeddings for Numerical Features in Tabular Deep Learning. \emph{Advances in Neural Information Processing Systems}, 35, 2022. \href{https://proceedings.nips.cc/paper_files/paper/2022/hash/9e9f0ffc3d836836ca96cbf8fe14b105-Abstract-Conference.html}{原文}.
+\bibitem{kelly2019} Kelly B T, Pruitt S, Su Y. Characteristics Are Covariances: A Unified Model of Risk and Return. \emph{Journal of Financial Economics}, 134(3):501--524, 2019. \href{https://doi.org/10.1016/j.jfineco.2019.05.001}{doi:10.1016/j.jfineco.2019.05.001}.
+\bibitem{duan2022} Duan Y, Wang L, Zhang Q, Li J. FactorVAE: A Probabilistic Dynamic Factor Model Based on Variational Autoencoder for Predicting Cross-Sectional Stock Returns. \emph{Proceedings of the AAAI Conference on Artificial Intelligence}, 36(4):4468--4476, 2022. \href{https://doi.org/10.1609/aaai.v36i4.20369}{doi:10.1609/aaai.v36i4.20369}.
+\bibitem{vaswani2017} Vaswani A, Shazeer N, Parmar N, et al. Attention Is All You Need. \emph{Advances in Neural Information Processing Systems}, 30, 2017. \href{https://arxiv.org/abs/1706.03762}{arXiv:1706.03762}.
+\bibitem{feng2019} Feng F, He X, Wang X, et al. Temporal Relational Ranking for Stock Prediction. \emph{ACM Transactions on Information Systems}, 37(2), Article 27, 2019. \href{https://doi.org/10.1145/3309547}{doi:10.1145/3309547}.
+\bibitem{burges2005} Burges C, Shaked T, Renshaw E, et al. Learning to Rank Using Gradient Descent. \emph{Proceedings of the 22nd International Conference on Machine Learning}, 89--96, 2005. \href{https://doi.org/10.1145/1102351.1102363}{doi:10.1145/1102351.1102363}.
+\bibitem{bailey2014} Bailey D H, Borwein J M, L\'opez de Prado M, Zhu Q J. Pseudo-Mathematics and Financial Charlatanism: The Effects of Backtest Overfitting on Out-of-Sample Performance. \emph{Notices of the American Mathematical Society}, 61(5):458--471, 2014. \href{https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2308659}{作者公开稿}.
+
+\bibitem{hoerl1970} Hoerl A E, Kennard R W. Ridge Regression: Biased Estimation for Nonorthogonal Problems. \emph{Technometrics}, 12(1):55--67, 1970. \href{https://doi.org/10.1080/00401706.1970.10488634}{doi:10.1080/00401706.1970.10488634}.
+\bibitem{adaptive} Dwork C, Feldman V, Hardt M, et al. Preserving Statistical Validity in Adaptive Data Analysis. \emph{Proceedings of the 47th Annual ACM Symposium on Theory of Computing}, 117--126, 2015. \href{https://arxiv.org/abs/1411.2664}{arXiv:1411.2664}.
+\bibitem{loshchilov2019} Loshchilov I, Hutter F. Decoupled Weight Decay Regularization. \emph{International Conference on Learning Representations}, 2019. \href{https://arxiv.org/abs/1711.05101}{arXiv:1711.05101}.
+\bibitem{skdbacktest} HenryZ16. \emph{skd-backtest}: 面向指数增强研究的日频Python回测框架 [软件]. \url{https://github.com/HenryZ16/skd-backtest}（访问日期：2026年10月17日）。
+\end{thebibliography}
+
+\clearpage
+\appendix
+\section{预处理、标签与基础分支}\label{app:base}
+记$R_t(z_i)$为同日集合中的平均并列秩除以集合大小。训练标签的排名在有效监督集合上计算，预测分数的排名在当日输出股票池上计算。
+
+\subsection{缺失值与训练样本}
+基础神经网络先以训练集逐列中位数填补缺失值；若一列在训练中全部缺失，则使用零。随后用训练均值和总体标准差标准化，退化标准差用1替代。该过程使用64位浮点数计算，再转为32位浮点矩阵输入网络，不额外截断标准化值。LightGBM保留其树模型路径中的缺失值处理。
+
+辅助教师使用训练期当日成员记录拟合逐列均值和标准差；标准化后的非有限值置零，结果截断在$[-8,8]$。修正头在自身的126维训练输入上独立拟合均值与标准差，采用同样的截断范围。当日截面排名和风格距离中的截面标准化，均在当前可见股票集合上计算。
+
+RH50主干最终训练的有效监督样本共499799条，信号日期为2016年1月4日至2022年12月28日，最晚标签端点为2022年12月30日。辅助分支的当日成员记录共510900条，包含上述有效监督样本。成员掩码控制哪些股票进入注意力和邻域，监督掩码控制哪些股票进入损失；一个未来标签无效的股票仍可作为当日已知集合的一员。
+
+基础模型与教师训练使用历史公开的\texttt{is\_st}及其原值副本；修正头在特征构造后清零\texttt{is\_st}，\texttt{raw\_is\_st}保留历史值。部署按评测端约定在原始输入层清零该字段，因而两列在推理时均为零。
+
+\subsection{监督目标与日期权重}
+树模型、普通TabM及第一个PLE模型拟合$\tilde y_{i,t}=R_t(y_{i,t})-0.5$。第二个PLE模型先在每个训练日用截距和十项官方风格解释原始收益：
+\begin{equation}
+ \hat\gamma_t=\arg\min_\gamma\|y_t-Z_t\gamma\|_2^2,\qquad
+ \tilde y^{\rm res}_{i,t}=R_t\bigl(y_{i,t}-(Z_t\hat\gamma_t)_i\bigr)-0.5,
+ \label{eq:reslabel}
+\end{equation}
+其中$Z_t$仅保留有效监督样本，数值最小二乘阈值为$10^{-6}$。式\eqref{eq:reslabel}是训练标签变换，推理不计算未来收益残差，也不读取$y_t$。每个训练日的单样本权重与有效股票数的倒数成正比，再归一化到全体样本平均权重为1，使每个日期具有相同的总权重。
+
+\subsection{集成与后处理}
+令$\ell_t,u_t,v_t,w_t$分别为LightGBM、普通TabM、收益排名PLE和残差排名PLE的原始预测。忽略仅用于保持数值一致性的中间舍入时，主要集成结构为
+\begin{equation}
+ c_t=0.75R_t\!\left(\frac{R_t(\ell_t)+R_t(u_t)}{2}\right)
+        +0.20R_t(v_t)+0.05R_t(w_t).
+ \label{eq:baseblend}
+\end{equation}
+式\eqref{eq:baseblend}中的系数作用于各层级的排名结果。
+
+令$q_t=R_t(c_t)$，将前一交易日分数按股票代码对齐，缺失时用当日值替代。中间名次平滑为
+\begin{equation}
+ h(q)=\max\{1-|q-0.5|/0.25,0\},\qquad
+ q^*_{i,t}=q_{i,t}+0.025h(q_{i,t})h(q_{i,t-1})(q_{i,t-1}-q_{i,t}).
+ \label{eq:smooth}
+\end{equation}
+平滑主要作用于当前和前日均靠近中间名次的股票。前日分数由当前调用提供的历史前缀重新计算。
+
+最后，对$R_t(q^*_t)$作部分风格残差化。令$B_t$为当日十项风格逐列标准化后的矩阵，$q'_t=R_t(q^*_t)$，则
+\begin{equation}
+ \hat\beta_t=(B_t^\top B_t+0.001N_t I)^{-1}B_t^\top(q'_t-\bar q'_t\bm 1),\qquad
+ b_t=q'_t-0.1B_t\hat\beta_t.
+ \label{eq:basepost}
+\end{equation}
+式\eqref{eq:basepost}移除10\%的风格线性拟合分量，保留大部分原信号。
+
+\section{条件因子网络与概率目标}\label{app:factor}
+\subsection{编码器与条件分布}
+347维输入经线性层、层归一化和整流线性单元（Rectified Linear Unit，ReLU，函数为$\max(0,x)$）映射为32维表示。输入门控由当日各特征的均值与标准差生成，对不同市场截面的特征使用强度作调整。四个注意力头各处理8维，基本运算为$\operatorname{softmax}(QK^\top/\sqrt{8})V$；$Q,K,V$分别为查询、键和值的线性映射。注意力之后，将自身表示、截面均值、截面标准差及自身减均值拼接，再通过残差层得到最终股票表示$h_{i,t}$。
+
+条件因子结构可写为
+\begin{equation}
+ z_t\mid X_t\sim\mathcal N(\mu_t,\diag(v_t)),\qquad
+ \hat y_t=\alpha_t+\Beta_tz_t+\epsilon_t,\qquad
+ \epsilon_t\mid X_t\sim\mathcal N(0,D_t),
+ \label{eq:generative}
+\end{equation}
+其中$z_t\in\R^4$与$\epsilon_t$在给定输入后独立，$D_t$为正对角矩阵。分布目标使用变换后收益$\hat y_{i,t}=\clip(y_{i,t}/0.02,-3,3)$。因子均值与方差由当日隐藏表示的均值、标准差生成，个体均值、载荷和特有方差由股票表示生成；均值与载荷线性头乘0.1，因子及个体对数方差截断在$[-4,2]$。
+
+边缘化$z_t$即得到正文式\eqref{eq:factor}。共同因子形成低秩协方差，条件独立的个体扰动形成对角项。
+
+\subsection{损失与低秩计算}
+在有效标签子集上，令$e_t=\hat y_t-m_t$、$n_t=|\mathcal V_t|$。省略与参数无关的常数后，每日NLL为
+\begin{equation}
+ \mathcal L_{{\rm NLL},t}=\frac{1}{2n_t}
+ \left[\log\det\Sigma_t+e_t^\top\Sigma_t^{-1}e_t\right].
+ \label{eq:nll}
+\end{equation}
+定义$M_t=I_4+U_t^\top D_t^{-1}U_t$，可利用矩阵行列式引理和Woodbury恒等式计算
+\begin{align}
+ \log\det\Sigma_t&=\sum_i\log D_{ii,t}+\log\det M_t,\notag\\
+ e_t^\top\Sigma_t^{-1}e_t
+ &=e_t^\top D_t^{-1}e_t
+ -(U_t^\top D_t^{-1}e_t)^\top M_t^{-1}(U_t^\top D_t^{-1}e_t).
+ \label{eq:woodbury}
+\end{align}
+实际求解对$4\times4$矩阵作Cholesky分解，不显式求逆整个股票协方差矩阵。上述子集计算只用于监督损失；生成隐藏状态时仍保留完整当日成员。
+
+令$r^{\rm aux}_{i,t}$为辅助编码器自身的排名头输出，$\sigma_{i,t}=\sqrt{\Sigma_{ii,t}}$，教师分数为
+\begin{equation}
+ g_{i,t}=r^{\rm aux}_{i,t}+0.1\tanh\!\left(\frac{m_{i,t}}{\max(\sigma_{i,t},0.05)}\right).
+ \label{eq:teacherscore}
+\end{equation}
+训练最小化$\mathcal L_{\rm MSE}(g,\tilde y)+0.05\mathcal L_{\rm NLL}$，两项均先按日有效样本数归一化，再在日期间平均。MSE对应中心化排名目标，NLL提供收益幅度与共同变化的辅助约束。
+
+\section{邻域、修正输入与成对损失}\label{app:peer}
+\subsection{距离与邻居权重}
+设$\bar B_{i,t}$为教师输入中前十项风格在当日再次标准化后的向量，$U_{i,t}$为四维共同载荷向量。分别计算平方欧氏距离$d^B_{ij,t}$与$d^U_{ij,t}$。令$m^B_t,m^U_t$为相应距离矩阵上三角中大于$10^{-12}$的距离中位数，无此类距离时取1，定义
+\begin{equation}
+ d_{ij,t}=\frac12\frac{d^B_{ij,t}}{m^B_t}+\frac12\frac{d^U_{ij,t}}{m^U_t},\qquad
+ w_{ij,t}=\frac{\exp(-d_{ij,t})}{\sum_{k\in\mathcal N_t(i)}\exp(-d_{ik,t})},\quad j\in\mathcal N_t(i).
+ \label{eq:neighbors}
+\end{equation}
+$\mathcal N_t(i)$为不含自身的24个最近邻；不足24只时使用可得邻居，距离并列采用稳定排序。风格和因子距离分别归一化，以消除量纲差异，两项权重均固定为0.5。
+
+$U$是按共同因子标准差缩放后的载荷；风格向量来自教师标准化与截断后的输入，并在当日再次标准化。关系选择由当日输入和冻结权重确定。
+
+\subsection{126维修正输入}
+每只股票的节点向量$z_{i,t}$为42维：32维隐藏状态、教师分数$g$、辅助排名头$r^{\rm aux}$、$\alpha/\sigma$、共同均值$(\Beta\mu)/\sigma$、$\log\sigma$、共同方差占总方差的比例，以及4维$U$。其中“共同方差占比”为$1-D_{ii}/\Sigma_{ii}$。这些统计量让修正头同时看到相对位置、预测不确定性和共同变化结构。
+
+邻居表示为$\bar z_{i,t}=\sum_{j\in\mathcal N_t(i)}w_{ij,t}z_{j,t}$。拼接$[z_{i,t},\bar z_{i,t},z_{i,t}-\bar z_{i,t}]$得到126维输入，再作训练统计量标准化。每个修正头是$126\to16\to1$的两层网络，中间使用ReLU，参数数目为$126\times16+16+16+1=2049$。输出层零初始化，使初始预测与教师一致。
+
+设头$r$的原始输出为$f_r$，分数增量和新分数为
+\begin{equation}
+ u^{(r)}_{i,t}=0.05\tanh(f_r(z_{i,t},\bar z_{i,t})),\qquad
+ \delta^{(r)}_{i,t}=u^{(r)}_{i,t}-\frac1{N_t}\sum_{k\in\mathcal U_t}u^{(r)}_{k,t},\qquad
+ a^{(r)}_{i,t}=g_{i,t}+\delta^{(r)}_{i,t}.
+ \label{eq:delta}
+\end{equation}
+0.05约束去均值前的输出，去均值后单个增量的绝对值可能超过0.05。公共平移不改变同日排序，两只股票间的增量差仍受式\eqref{eq:pairbound}约束。
+
+\subsection{损失中的有效标签与收益差距}
+为简化符号，下式略去修正头上标。令$v_{i,t}\in\{0,1\}$为标签有效掩码，$\Delta y_{ij,t}=y_{i,t}-y_{j,t}$。成对权重定义为
+\begin{equation}
+ \omega_{ij,t}=w_{ij,t}v_{i,t}v_{j,t}
+ \min\!\left(\frac{|\Delta y_{ij,t}|}{0.02},3\right).
+ \label{eq:pairweight}
+\end{equation}
+收益相同的配对权重为零；较大的收益差距增加重要性，上限3避免少数极端差距无限放大。每日成对损失为
+\begin{equation}
+ \mathcal L_{{\rm pair},t}=
+ \frac{\displaystyle\sum_i\sum_{j\in\mathcal N_t(i)}\omega_{ij,t}
+ \log\!\left[1+\exp\!\left(-\operatorname{sign}(\Delta y_{ij,t})
+ \frac{a_{i,t}-a_{j,t}}{0.1}\right)\right]}
+ {\displaystyle\max\!\left(\sum_i\sum_{j\in\mathcal N_t(i)}\omega_{ij,t},10^{-12}\right)}.
+ \label{eq:pairloss}
+\end{equation}
+0.1为logistic温度，决定分数差对应的惩罚敏感程度。当预测顺序与收益顺序相反时，该损失增大。总体目标为各日期平均的排名MSE、$\lambda$倍有效标签上的$\delta^2$均值、以及$0.02\mathcal L_{\rm pair}$之和。两个头分别取$\lambda=2$与$\lambda=1$，教师保持冻结，两头使用相同随机种子。
+
+预测时不计算式\eqref{eq:pairweight}或\eqref{eq:pairloss}中的当前目标收益项，只使用已训练的头产生$a^{(1)},a^{(2)}$。参考路径在分数空间等权平均两头形成$a_t$，随后与基础分支分别排名并按正文式\eqref{eq:blend}融合。统计增强路径采用正文式\eqref{eq:qstart}中的轻微非等权组合。
+
+\section{训练配置与推理实现}\label{app:config}
+表\ref{tab:config}汇总训练超参数。神经网络采用AdamW，即解耦权重衰减的自适应优化方法\cite{loshchilov2019}。权重衰减约束网络参数，保持惩罚约束分数改变量。Dropout在训练时随机丢弃部分激活，推理时关闭；各阶段训练轮数固定。
+
+\begin{table}[htbp]\centering\small
+\caption{RH50主干训练配置。PLE分支与普通TabM共享主干配置；新增组件配置见附录\ref{app:windowconfig}。}\label{tab:config}
+\begin{tabularx}{\linewidth}{p{2.5cm}X}\toprule
+模块 & 主要配置\\\midrule
+LightGBM & 800棵树，学习率0.035，15叶，最小叶样本500，$L_2$惩罚20；列采样0.85，行采样0.8并每轮启用；4个训练线程。\\
+普通TabM & 两层宽64，8个隐式成员，ReLU，Dropout 0.1；24轮，批量4096，学习率0.002，权重衰减0.0003。\\
+两个PLE模型 & 各数值特征使用8个分位节点，嵌入维数4，官方实现version B且不附加激活；主干同上，2个训练线程。重复分位会合并为较少的有效区间。\\
+条件因子教师 & 宽32，4头注意力，4个因子，Dropout 0.05；16轮，每批8天，学习率0.001，权重衰减0.0003，梯度范数裁剪阈值1。\\
+双修正头 & 每头$126\to16\to1$；16轮，每批16天，学习率0.001，权重衰减0.001，保持系数2与1，2个训练线程。\\\bottomrule
+\end{tabularx}
+\end{table}
+
+各训练阶段使用种子42。主干训练顺序为基础模块、条件因子教师、两个修正头；随后估计统计路径的先验与惩罚矩阵，并训练上下文头。各阶段使用相同的标签截止边界；修正阶段保持教师参数固定。教师和修正头使用同一训练期数据。
+
+部署使用NumPy进行神经网络矩阵运算，用LightGBM加载树模型，不依赖PyTorch运行神经网络，固定权重不在推理阶段更新；窗口闭式统计只产生当次临时量。两个头共享一次教师前向和邻域构造；基础神经网络复用预处理结果。注意力和距离计算随当日股票数呈二次增长，但只处理一个日期的截面；修正表示按日期构造，避免同时物化全部日期的“股票$\times$邻居$\times$通道”数组。
+
+两头各自输出32位浮点分数，以64位浮点等权相加后转回32位，再作平均并列百分位排名。基础与辅助排名以0.6/0.4融合，参考分数保留12位小数；基础集成保留导出实现的中间舍入规则。推理在调用范围内使用1个数值计算线程。
+
+
+\section{窗口与上下文配置}\label{app:windowconfig}
+两条统计路径共用20日窗口、20日半衰期、0.45的极端目标阈值、0.15的增量限幅，以及风格0.7、其余0.1的对角正则。22维与30维先验分别使用岭系数0.1和0.01在线下估计。稳定性矩阵来自训练期特征日变化的二阶统计，按平均对角尺度归一化后，以0.1加入惩罚矩阵。训练先验和矩阵均遵循对应年度模型的标签截止边界。
+
+上下文路径的零先验回归使用相同窗口和对角正则，不加稳定性矩阵。其52维输入顺序为22维逐元素贡献、8维市场状态和22维原统计表示，与126维邻域表示拼接为178维。网络训练16轮，每批16天，AdamW学习率与权重衰减均为0.001，种子42；保持系数2、配对系数0.2，配对温度与收益差距缩放沿用式\eqref{eq:pairloss}。没有额外直接针对组合风险的损失项。
+
+窗口中的历史教师表示逐日重建，不复用其他调用中的数据。可用历史标签日不足10日时，统计求解返回先验，因此对应的相对先验增量为零。标准评测的120日完整窗口足以覆盖20日统计及历史特征的依赖范围。无效标签只影响监督与回归统计，不影响当时可见成员的定义。
+
+\section{复现、实现与证据范围}\label{app:reproduce}
+\subsection{时间划分与证据来源}
+年度验证要求训练标签退出端点早于评价年，而不只要求特征日期早于评价年。例如，年末的一条信号若其收益端点落入下一年，就不能用于下一年验证模型的训练。连续RankIC使用970个有效日期；年度文件对跨年端点的处理与连续评价不同，因此不能将年度均值简单平均以重建连续结果。
+
+本地表格来自保存的年度预测及其固定组合回测，公开与私有成绩来自参赛反馈记录。材料目录提供原始结果表、固定配置与反馈来源。正文未对未知隐藏日期和配置作补充假定，也未据小幅差异给出未经计算的显著性结论。
+
+\subsection{复现入口与数值实现}
+完整代码与冻结权重位于发布目录的\texttt{submission/}中。推理依赖见\texttt{requirements.txt}，训练依赖另见\texttt{requirements-training.txt}。三张官方表的文件层级为
+\begin{quote}\small
+\texttt{TableName/YYYY/MM/YYYYMM.parquet}
+\end{quote}
+在\texttt{submission}目录中，重训入口为
+\begin{quote}\small
+\begin{verbatim}
+python train.py --data-dir /path/to/Data \
+  --model-dir /path/to/new_model
+\end{verbatim}
+\end{quote}
+输出目录应为空。推理使用\texttt{InferenceModel(model\_dir)}及其\texttt{predict(as\_of\_date,data)}接口，返回当日全部成员的日期、代码和分数。文中图示的小型数值例子用于解释机制，实际输入输出例子见表\ref{tab:inputpreview}和表\ref{tab:outputpreview}。
+
+神经网络推理采用NumPy矩阵运算，树模型由LightGBM加载。共同教师、邻域与基础预处理在同一调用内复用；模型不保存跨日行情状态。完整实现保留中间舍入、32/64位转换、稳定排序和平均并列秩规则，重写时改变这些细节可能在密集分数区产生名次差异。
+
+在本机CPU、单数值线程的有限日期计时中，保持权重不变的推理实现将单次调用中位耗时由2.403秒降至1.579秒，进程峰值常驻内存由879.5 MiB降至709.0 MiB。时间约为原实现的65.7\%，测量包含当地数据与库环境，不代表隐藏评测总耗时。抽样1200个分数与参考实现逐位一致；这些一致性结果的范围不等同于对所有输入或完整多年原始数据回放的证明。
+
+\end{document}

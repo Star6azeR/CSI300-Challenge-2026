@@ -1,0 +1,25 @@
+分层解冻实验，2026-10-12
+固定D223/辅助60/40，P01/R1=47.5/52.5；未搜索融合系数。
+目标仍为公榜RankIC>=0.092、组合IR>=5.5；本轮只有本地开发验证，没有新的公榜结果。
+HEADS只解冻因子头；TOP额外解冻mix2/mix_norm；BLOCK额外解冻mix1。均使用JOINT目标。
+输入编码/市场门控/注意力/排名输出头的参数严格冻结；注意这不代表上游变动后的排名输出不变。
+每个教师后重新编码原始特征、重建邻域缓存并重训两个peer头；没有沿用旧nodes缓存。
+各冻结参数实际变化均为0，详见teachers下trainable_layers.json与parameter_changes.json。
+先以已观察2022年筛选，delta<-0.0002剪枝；通过后扩展2020/2021；三年均值>=0.0005才考虑2019。
+所有年份都是已观察开发集，不称为未见集。
+candidate  year   RankIC     delta
+      TOP  2022 0.078357 -0.000031
+      TOP  2021 0.075012 -0.000063
+      TOP  2020 0.100365  0.000717
+    HEADS  2022 0.077733 -0.000656
+    BLOCK  2022 0.077996 -0.000392
+candidate          years  mean_delta  worst_delta  positive_years  top30_overlap  continuous_delta
+      TOP 2020,2021,2022    0.000208    -0.000063               1       0.929330               NaN
+    BLOCK           2022   -0.000392    -0.000392               0       0.900413               NaN
+    HEADS           2022   -0.000656    -0.000656               0       0.943388               NaN
+通过完整打包前门槛的候选：[]
+训练/导出验证：{"teacher_fits": 5, "peer_fits": 10, "total_training_jobs": 15, "all_frozen_parameters_unchanged": true, "fusion_weights_unchanged": {"outer": 0.4, "P01": 0.475, "R1": 0.525}, "eligible_for_package_checks": [], "public_submissions": 0, "target_achieved": false, "training_peak_RSS_MiB": 7179.46875, "max_numpy_error": 1.0519136377229454e-07, "inference_memory_benchmarked": false}
+没有计算本地组合IR。训练内存不能等同公榜推理内存。
+如果候选列表为空，则不打包、不训练2023部署权重。
+本轮结果仅覆盖上述配置，不能断言全部分层解冻方法无效。
+复现见REPRODUCE.txt，模型与配置在teachers/和fits/，全部结果在ALL_EXPERIMENTS.csv。

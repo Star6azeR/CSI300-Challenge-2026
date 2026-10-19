@@ -1,0 +1,17 @@
+{
+  "family": "market_attention",
+  "width": 32,
+  "heads": 4,
+  "market_gate": true,
+  "dropout": 0.05,
+  "epochs": 16,
+  "seed": 42,
+  "batch_days": 8,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0003,
+  "factors": 4,
+  "cash_inference_weight": 0.1,
+  "return_scale": 0.02,
+  "factor_weight": 0.05,
+  "fit_only": true
+}

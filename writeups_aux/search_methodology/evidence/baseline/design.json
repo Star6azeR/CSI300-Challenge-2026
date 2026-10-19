@@ -1,0 +1,117 @@
+{
+  "purpose": "Detailed exploratory report; 2022 already observed; no tuning or early stopping in this comparison.",
+  "variants": {
+    "M0_constant": {
+      "model": "constant",
+      "features": "base43",
+      "target": "none"
+    },
+    "M1_ridge": {
+      "model": "ridge",
+      "features": "base43",
+      "target": "rank"
+    },
+    "M2_barra": {
+      "model": "lgbm",
+      "features": "barra10",
+      "target": "rank"
+    },
+    "M3_raw_return": {
+      "model": "lgbm",
+      "features": "base43",
+      "target": "raw"
+    },
+    "M4_rank": {
+      "model": "lgbm",
+      "features": "base43",
+      "target": "rank"
+    },
+    "M5_history": {
+      "model": "lgbm",
+      "features": "extended63",
+      "target": "rank"
+    },
+    "M6_lambdarank": {
+      "model": "ranker",
+      "features": "base43",
+      "target": "10bins"
+    },
+    "M7_catboost": {
+      "model": "catboost",
+      "features": "base43",
+      "target": "rank"
+    },
+    "M8_blend": {
+      "model": "blend",
+      "features": "base43",
+      "target": "0.5*M4_rank+0.5*M7_rank"
+    }
+  },
+  "tree_parameters": {
+    "n_estimators": 80,
+    "learning_rate": 0.04,
+    "num_leaves": 15,
+    "max_depth": 5,
+    "min_child_samples": 300,
+    "reg_lambda": 10,
+    "colsample_bytree": 0.85,
+    "subsample": 0.8,
+    "subsample_freq": 1,
+    "random_state": 42,
+    "n_jobs": 4,
+    "verbosity": -1,
+    "deterministic": true,
+    "force_col_wise": true
+  },
+  "catboost_parameters": {
+    "iterations": 150,
+    "depth": 5,
+    "learning_rate": 0.04,
+    "l2_leaf_reg": 10,
+    "loss_function": "RMSE",
+    "random_seed": 42,
+    "thread_count": 4,
+    "verbose": false,
+    "allow_writing_files": false,
+    "task_type": "CPU",
+    "bootstrap_type": "No",
+    "random_strength": 0,
+    "nan_mode": "Min"
+  },
+  "ridge_alpha": 100,
+  "ranker_parameters": {
+    "label_gain": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "lambdarank_truncation_level": 300,
+    "objective": "lambdarank"
+  },
+  "years": [
+    2019,
+    2020,
+    2021,
+    2022
+  ],
+  "lookback": 61,
+  "versions": {
+    "pandas": "2.2.3",
+    "numpy": "2.3.5",
+    "pyarrow": "25.0.1",
+    "scipy": "1.18.1",
+    "lightgbm": "4.7.0",
+    "catboost": "1.2.10",
+    "scikit-learn": "1.9.1",
+    "skd-backtest": "1.0.1"
+  },
+  "python": "3.12.14",
+  "stage": "written before any new model result"
+}

@@ -1,0 +1,29 @@
+{
+  "features": [
+    "barra_市值",
+    "barra_贝塔",
+    "barra_残差波动",
+    "barra_非线性市值",
+    "barra_账面市值比",
+    "barra_流动性",
+    "barra_盈利",
+    "barra_成长",
+    "barra_杠杆",
+    "pe_ttm",
+    "pb",
+    "roe_avg_ttm",
+    "roa_avg_ttm",
+    "debt_to_asset_lf",
+    "float_market_cap",
+    "ret1",
+    "intraday",
+    "overnight",
+    "vol5",
+    "vol20",
+    "amount_ratio20",
+    "turn_ratio20"
+  ],
+  "train_max_label_exit": 20221230,
+  "data_end": 20221230,
+  "training_cutoff": 20230101
+}

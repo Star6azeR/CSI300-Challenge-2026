@@ -1,0 +1,4 @@
+interface:
+  display_name: "约束驱动竞赛建模"
+  short_description: "核对规则与基线，实际训练并动态剪枝，兼顾验证、资源约束与最终交付"
+  default_prompt: "使用 $constraint-driven-model-research，核对当前比赛的规则、数据和官方基线，建立验证方案，在预算内实际训练、自适应搜索并交付可复现模型。"

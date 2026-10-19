@@ -1,0 +1,13 @@
+{
+  "score_arithmetic": "float32_heads_float64_average_float32_output",
+  "members": [
+    {
+      "directory": "adapter",
+      "weight": 0.475
+    },
+    {
+      "directory": "adapter_r1",
+      "weight": 0.525
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "split": "train",
+  "year": 2023,
+  "start": 20160101,
+  "cutoff_exclusive": 20230101,
+  "label_exit_max": 20221230,
+  "asof_rows": 510900,
+  "valid_labels": 499799,
+  "is_st": "raw zero",
+  "H": 1,
+  "label": "adjusted O(t+2)/O(t+1)-1",
+  "input_lookback": 61,
+  "membership": "asof only, independent of labels",
+  "teacher_label_exit_max": 20221230,
+  "teacher_sha256": {
+    "model.json": "ccad7d2a6aad24aa64167ec9f822257476cb6f3f7e74710083db3a8239ec42af",
+    "factors.npz": "51d8988798d296b300645b7c71c8219186941ff09cc1167a474fbfc8eff7f388",
+    "base/model.json": "9b609ce507005f1f6c664a847282e43ef570dd4bddaded2ec8b455829d3df744",
+    "base/weights.npz": "66f07f64efec7b89de6c84712cf91dbf3cccf1cf54448e8b3cc8fa4eee222bb0"
+  }
+}

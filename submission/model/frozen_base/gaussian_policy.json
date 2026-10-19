@@ -1,0 +1,5 @@
+{
+  "auxiliary_weight": 0.4,
+  "lookback_days": 62,
+  "score_policy": "rank_blend"
+}

@@ -1,0 +1,67 @@
+Factor capacity and regularization adaptive study
+Updated UTC: 2026-10-02T11:39:53.321851+00:00
+Own budget units: 24/64; all fits, paid replays and failures count.
+External fixed-recipe completions and continuous confirmations remain in the central ledger.
+
+Protocol: H1 adjusted O(t+2)/O(t+1)-1; training labels end before each evaluation year.
+Daily full as-of universe; label masks affect loss only. Original 347 permitted features.
+Fixed D223 daily rank anchor 5%, frozen C1/C2 fees and portfolio constraints.
+All 2019-2022 years have been observed; these are adaptive validation results, not untouched tests.
+
+Complete own-training recipe FA004: width32, four attention heads and four latent factors,
+16 epochs, seed42, dropout.05, AdamW lr.001/wd.0003, Gaussian weight.05, cash readout.1.
+This is an analytic low-rank conditional Gaussian model, not a complete FactorVAE implementation.
+
+Annual deltas relative to D223 (IC, portfolio IR):
+Candidate  Year  Status       DeltaRankIC    DeltaIR      Attempt           Budget owner
+FA001     2021  completed    +0.00063225    -0.075274    7ae7b27e985d42b9  own
+FA001     2020  completed    +0.00075104    -0.150338    3817511f52594a6e  own
+FA002     2021  completed    +0.00098816    +0.096893    c26b65c46be44240  own
+FA002     2020  completed    +0.00061593    +0.141303    2f1345d1ce69431e  own
+FA002     2019  pruned       -0.00013973    -            4a7792c286104563  own
+FA003     2021  completed    +0.00106405    -0.128016    970b50a45435483a  own
+FA003     2020  completed    +0.00082730    +0.230017    c8d07fb1ba1b4234  own
+FA004     2021  completed    +0.00084385    +0.002116    eeebcdcb2d694c87  own
+FA004     2020  completed    +0.00081096    +0.196186    b51c3b19df704695  own
+FA004     2019  completed    +0.00026848    -0.286294    ee9b130a73c54d83  own
+FA004     2022  completed    +0.00036621    +0.103224    6e321947e212478b  own
+FA004Q    2019  completed    +0.00021317    -0.521122    5988d7199a704ebb  own
+FA005     2021  completed    +0.00106787    -0.134706    d60af47bb53341ad  own
+FA005     2020  completed    +0.00100131    -0.004216    a9ad732b98c5461e  own
+FA006     2021  completed    +0.00095912    -0.353101    b50aa81968844cdf  own
+FA006     2020  completed    +0.00065436    -0.113562    4364aca97358483d  own
+FA007     2021  completed    +0.00095218    -0.061645    3942eda753a341cc  own
+FA007     2020  completed    +0.00088776    +0.168070    708c816cec664ed3  own
+FA008     2021  completed    +0.00053831    +0.033205    295f2a8ddbcd4fc5  own
+FA003     2019  completed    +0.00039449    -0.062753    991182f14b30448c  external
+FA008     2020  completed    +0.00026077    -0.224536    9250c69313b94253  own
+FA009     2021  completed    +0.00060590    -0.283423    9390b2fdaf784d29  own
+FA003     2022  completed    +0.00063873    +0.034424    57ec0b0f22ba4ada  external
+FA009     2020  completed    +0.00088837    -0.030040    9ef46c6dbb884247  own
+FA010     2021  completed    +0.00079228    -0.226455    16b2ac820ac24e9c  own
+FA010     2020  completed    +0.00074853    +0.027457    b5d61ec446a649c9  own
+
+Continuous confirmations by root (not re-run here):
+{"attempt_id": "5d300a7531294045", "candidate_id": "FA004", "cost_scenario": "C1", "status": "completed", "mean_rankic": 0.08270307937498272, "delta_rankic": 0.0005751131052304221, "portfolio_ir": 4.523744099131797, "delta_ir": 0.046680179539165145}
+{"attempt_id": "1293b670ef864e64", "candidate_id": "FA004", "cost_scenario": "C2", "status": "completed", "mean_rankic": 0.08270307937498272, "delta_rankic": 0.0005751131052304221, "portfolio_ir": 0.9348833643750913, "delta_ir": 0.013557437578517462}
+
+Adaptive decisions:
+- One latent factor lost IR in both screening years; six improved both but failed 2019 IC.
+- Dropout.15 on six factors had an annual tradeoff; frontier_expansion independently completed fixed recipe FA003.
+- Four factors passed all four annual IC gates; continuous gains are modest, not the large-IR target.
+- Fixed 25-group readout on FA004 worsened 2019 and was stopped; no bin grid.
+- Gaussian weights.02/.1 both lost IR in both screening years; stopped.
+- Saved-weight c0 cash readout increased IC but reduced IR versus c.1 in both screening years; no c.05 grid.
+- Width16/48 endpoints did not improve two-fold IR; lower training loss was not treated as success.
+- FA010 weight decay.03 lost IR versus FA004 in both screening years; stopped without a wd grid.
+- Current batch finished at24 own units;40 remain unspent. No own experiment remains active.
+
+Deployment evidence:
+Saved pure NumPy models avoid Torch at inference; full original source, preprocessing, contracts and hashes are in each attempt.
+FA007 preserves every saved weight hash and exactly replays the original c.1 first day before overriding readout.
+Width32 factor models are about230KB; width16 about107KB. These are auxiliary model sizes.
+Training/replay dataset RSS is not the complete submission inference RSS. No new full-package resource claim is made here.
+
+Files: results.csv, latest_results.json, decisions.jsonl, per-candidate JSON configs, model.py, encoder.py,
+run.py, run_readout.py, readout_job.py, FA004_manifest.json and shared attempts/<attempt_id>/.
+All local results, including pruned variants, are retained. No public submission was made.

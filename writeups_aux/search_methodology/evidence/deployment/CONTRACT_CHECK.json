@@ -1,0 +1,23 @@
+{
+  "static_flags": [],
+  "python": "3.11.16 (main, Sep 29 2026, 14:49:58) [Clang 22.1.3 ]",
+  "input_unchanged": true,
+  "array_state_unchanged": true,
+  "model_files_byte_identical": true,
+  "no_predict_data_file_or_network_io": true,
+  "standard_library_code_import_reads": [
+    "research/score_search/robust_search_20261001/validation_py311/lib/python3.11/site-packages/pandas/core/reshape/__pycache__/reshape.cpython-311.pyc"
+  ],
+  "order_repeat_and_future_poison_exact": true,
+  "is_st_ignored": true,
+  "training_entry_imports": [
+    "submission.train_base",
+    "submission.train_auxiliary",
+    "submission.train_peer_ensemble",
+    "submission.train_frozen",
+    "submission.train_new",
+    "submission.train_correction"
+  ],
+  "training_reproduction": "Entry imports and CLI checked; full frozen recipe not retrained in this audit. Previous K3 raw retrain evidence is retained separately.",
+  "output_signature": "(self, as_of_date: str, data: dict[str, pandas.core.frame.DataFrame]) -> pandas.core.frame.DataFrame"
+}

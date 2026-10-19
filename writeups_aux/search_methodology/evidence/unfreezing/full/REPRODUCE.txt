@@ -1,0 +1,33 @@
+全因子网络参数搜索，2026-10-12。
+固定D22360%/辅助40%、修正头47.5%/52.5%，没有融合系数搜索。
+因子网络全部60336个参数requires_grad=True，包含输入编码、市场门控、注意力、截面交互、排名头、alpha/beta/idio/prior、6个语义组路由参数。
+组路由保持is_st通道缩放为1，输入raw is_st归零不变。
+D223基座未重训，本轮不能称为整个提交包所有分量全部重训；树模型没有梯度解冻操作。
+每个版本重新生成按年表示与邻域缓存、重训两个修正头。
+
+共同参数：8epochs、seed42、AdamW wd=3e-4、batch8、JOINT软排序相关性损失0.02。
+SLOW：lr3e-5，教师保留2，NLL0.05。
+FREE：lr1e-4，教师保留0，NLL0.05。
+ANCHOR：lr1e-4，教师保留8，NLL0.05。
+RANK：lr1e-4，教师保留2，NLL0。
+上述是预登记首批假设检验，按结果剪枝，不以全网格穷举作为结束条件。
+先2022（已观察失败年），delta<-0.0002则剪枝；否则2020/2021依次检查。
+三年平均提升至少0.0005且最差年度>=-0.0002，最多选1个扩展2019。
+目标公榜RankIC>=0.092、IR>=5.5；没有本地IR选型或自动提交，不能以本地改善保证公榜表现。
+年度训练标签exit_date严格早于评价年；H=1、许可输入、回看、费用与组合口径继承fixed_evaluation_contract.json。
+所有年份已观察，非未见测试集。
+
+复现：复制本目录py代码、search_configs.json、plan.json到research/score_search新目录（保留旧输出）。
+从项目根目录设置DYLD_LIBRARY_PATH=$PWD/research/.venv/lib/python3.12/site-packages/sklearn/.dylibs，
+OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=VECLIB_MAXIMUM_THREADS=1，
+research/.venv/bin/python 新目录/search.py。
+控制器调用既有validation_py311环境，顺序训练，每进程2线程。
+依赖cache/samples.parquet和原FA004年度初始化模型、F02年度对照预测。
+所有配置、训练曲线、权重与NumPy一致性记录在teachers/、fits/，结果在ALL_EXPERIMENTS.csv。
+
+自适应追加：首批4个在2022均失败后，运行adaptive.py。
+DISCLR：底层enc/enc_norm/market gate/attention参数lr=1e-5，其余参数lr=1e-4；全部参数仍可训练。
+RECENT：因子网络只用评价年前最近3个自然年的训练信号微调，标签仍严格退出在评价年前；lr=1e-4。
+RECENT保留原训练期拟合的预处理和初始化权重；修正头仍按原2016起训练期重建/训练，不称为整包三年窗口。
+两个版本均保留教师约束2和NLL0.05，融合参数不变，48作业上限不变。
+追加配置与决策在adaptive_addendum.json、adaptive_selection.json；冻结/可训练名录按模型保存在trainable_parameters.json。

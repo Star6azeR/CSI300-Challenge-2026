@@ -1,0 +1,19 @@
+{
+  "name": "FINAL_K3_R80_HEAD",
+  "neighborhood": "factor_barra",
+  "pair_coefficient": 0.2,
+  "width": 128,
+  "delta_cap": 0.05,
+  "neighbors": 24,
+  "epochs": 16,
+  "learning_rate": 0.001,
+  "weight_decay": 0.001,
+  "preserve_coefficient": 2.0,
+  "pair_temperature": 0.1,
+  "return_gap_scale": 0.02,
+  "seed": 42,
+  "batch_days": 16,
+  "outer_auxiliary_weight": 0.4,
+  "feature_mode": "full",
+  "risk_coefficient": 0.0
+}

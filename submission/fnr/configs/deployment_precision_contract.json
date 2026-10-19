@@ -1,0 +1,9 @@
+{
+  "auxiliary_before_rank_dtype": "float32",
+  "conversion_scope": "after full auxiliary forward, before cross-sectional ranking",
+  "ranking": "daily average percentile ranks",
+  "final_score_decimals": 12,
+  "base_recipe": "fnr/configs/training_recipe.json",
+  "auxiliary_recipe": "fnr/configs/auxiliary_recipe.json",
+  "inference_override": {}
+}

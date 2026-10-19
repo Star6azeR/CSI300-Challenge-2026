@@ -1,0 +1,34 @@
+{
+  "architecture": "causal_set_and_temporal_mixer",
+  "config": {
+    "batch_days": 8,
+    "cash_inference_weight": 0.1,
+    "dropout": 0.05,
+    "epochs": 16,
+    "factor_weight": 0.05,
+    "factors": 4,
+    "family": "market_attention",
+    "fit_only": true,
+    "heads": 4,
+    "history_dim": 16,
+    "history_length": 20,
+    "layer_norm_eps": 1e-05,
+    "learning_rate": 0.001,
+    "market_gate": true,
+    "return_scale": 0.02,
+    "seed": 42,
+    "temporal_hidden": 8,
+    "temporal_patches": [
+      1,
+      5
+    ],
+    "weight_decay": 0.0003,
+    "width": 32
+  },
+  "dtype": "float32",
+  "format_version": 1,
+  "input_dim": 347,
+  "mask_policy": "asof feature membership only; never future label validity",
+  "numpy_runtime": "modules.py",
+  "parameter_count": 59612
+}

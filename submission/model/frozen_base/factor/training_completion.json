@@ -1,0 +1,111 @@
+{
+  "candidate": "RH50",
+  "heads": [
+    {
+      "candidate": "P01",
+      "year": 2023,
+      "config": {
+        "name": "P01",
+        "neighborhood": "factor_barra",
+        "pair_coefficient": 0.02,
+        "width": 16,
+        "delta_cap": 0.05,
+        "neighbors": 24,
+        "epochs": 16,
+        "learning_rate": 0.001,
+        "weight_decay": 0.001,
+        "preserve_coefficient": 2.0,
+        "pair_temperature": 0.1,
+        "return_gap_scale": 0.02,
+        "seed": 42,
+        "batch_days": 16,
+        "outer_auxiliary_weight": 0.4
+      },
+      "contract": {
+        "split": "train",
+        "year": 2023,
+        "start": 20160101,
+        "cutoff_exclusive": 20230101,
+        "label_exit_max": 20221230,
+        "asof_rows": 510900,
+        "valid_labels": 499799,
+        "is_st": "raw zero",
+        "H": 1,
+        "label": "adjusted O(t+2)/O(t+1)-1",
+        "input_lookback": 61,
+        "membership": "asof only, independent of labels",
+        "teacher_label_exit_max": 20221230,
+        "teacher_sha256": {
+          "model.json": "ccad7d2a6aad24aa64167ec9f822257476cb6f3f7e74710083db3a8239ec42af",
+          "factors.npz": "51d8988798d296b300645b7c71c8219186941ff09cc1167a474fbfc8eff7f388",
+          "base/model.json": "9b609ce507005f1f6c664a847282e43ef570dd4bddaded2ec8b455829d3df744",
+          "base/weights.npz": "66f07f64efec7b89de6c84712cf91dbf3cccf1cf54448e8b3cc8fa4eee222bb0"
+        }
+      },
+      "new_parameters": 2049,
+      "teacher_parameters_frozen": true,
+      "initial_prediction_parity": 0.0,
+      "numpy_torch_max_error": 7.450580596923828e-09,
+      "seconds": 26.862491375068203,
+      "training_peak_RSS_MiB": 5774.4375,
+      "adapter_sha256": {
+        "adapter.json": "60b8083a9b1b662346dae2f9e910e0569fb73df0d575da49b02972b60380494e",
+        "adapter.npz": "dc9ec73e509d2dd5b88f67701a3225cef25fe695bae3e8debdc09f5ded064850"
+      }
+    },
+    {
+      "candidate": "R1",
+      "year": 2023,
+      "config": {
+        "name": "R1",
+        "seed": 42,
+        "pair_coefficient": 0.02,
+        "neighborhood": "factor_barra",
+        "width": 16,
+        "delta_cap": 0.05,
+        "neighbors": 24,
+        "epochs": 16,
+        "learning_rate": 0.001,
+        "weight_decay": 0.001,
+        "preserve_coefficient": 1.0,
+        "pair_temperature": 0.1,
+        "return_gap_scale": 0.02,
+        "batch_days": 16,
+        "outer_auxiliary_weight": 0.4
+      },
+      "contract": {
+        "split": "train",
+        "year": 2023,
+        "start": 20160101,
+        "cutoff_exclusive": 20230101,
+        "label_exit_max": 20221230,
+        "asof_rows": 510900,
+        "valid_labels": 499799,
+        "is_st": "raw zero",
+        "H": 1,
+        "label": "adjusted O(t+2)/O(t+1)-1",
+        "input_lookback": 61,
+        "membership": "asof only, independent of labels",
+        "teacher_label_exit_max": 20221230,
+        "teacher_sha256": {
+          "model.json": "ccad7d2a6aad24aa64167ec9f822257476cb6f3f7e74710083db3a8239ec42af",
+          "factors.npz": "51d8988798d296b300645b7c71c8219186941ff09cc1167a474fbfc8eff7f388",
+          "base/model.json": "9b609ce507005f1f6c664a847282e43ef570dd4bddaded2ec8b455829d3df744",
+          "base/weights.npz": "66f07f64efec7b89de6c84712cf91dbf3cccf1cf54448e8b3cc8fa4eee222bb0"
+        }
+      },
+      "new_parameters": 2049,
+      "teacher_parameters_frozen": true,
+      "initial_prediction_parity": 0.0,
+      "numpy_torch_max_error": 7.450580596923828e-09,
+      "seconds": 6.281862791045569,
+      "training_peak_RSS_MiB": 1531.9375,
+      "adapter_sha256": {
+        "adapter.json": "9d346031b792d210913154d0948ef5814851aa081d089dd151cb84ba982b2935",
+        "adapter.npz": "8691a5dda4b80bfda7099c7860f424946936d947c33ec586a8f69923b7889b2e"
+      }
+    }
+  ],
+  "total_adapter_parameters": 4098,
+  "teacher_parameters_frozen": true
+}

@@ -1,0 +1,667 @@
+% !TEX program = xelatex
+\documentclass[UTF8,11pt,a4paper,fontset=fandol]{ctexart}
+% Treat missing glyphs as errors instead of silently producing blank text.
+\tracinglostchars=3
+% Prefer native TrueType CJK fonts on macOS; retain Fandol elsewhere.
+% This avoids the Fandol CFF font path when testing PDF preview compatibility.
+\IfFontExistsTF{Songti SC}{%
+  \setCJKmainfont{Songti SC}%
+  \setCJKfamilyfont{zhsong}{Songti SC}%
+}{}
+\IfFontExistsTF{Heiti SC}{%
+  \setCJKsansfont{Heiti SC}%
+  \setCJKfamilyfont{zhhei}{Heiti SC}%
+}{}
+\usepackage[margin=2.54cm]{geometry}
+\usepackage{amsmath,amssymb,bm,booktabs,tabularx,array,graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit}
+\usepackage{xcolor,fancyhdr,enumitem,microtype}
+% Module colors.
+\definecolor{rhShared}{HTML}{59636D}
+\definecolor{rhBase}{HTML}{245B96}
+\definecolor{rhTeacher}{HTML}{006C67}
+\definecolor{rhNeighbor}{HTML}{936500}
+\definecolor{rhCorrection}{HTML}{754599}
+\definecolor{rhFusion}{HTML}{B0442E}
+\tikzset{
+ rh shared/.style={draw=rhShared,fill=rhShared!5},
+ rh base/.style={draw=rhBase,fill=rhBase!5},
+ rh teacher/.style={draw=rhTeacher,fill=rhTeacher!5},
+ rh neighbor/.style={draw=rhNeighbor,fill=rhNeighbor!5},
+ rh correction/.style={draw=rhCorrection,fill=rhCorrection!5},
+ rh fusion/.style={draw=rhFusion,fill=rhFusion!5},
+ rh flow/.style={->,line width=.8pt,draw=black!60},
+ rh training/.style={dashed}
+}
+\usepackage[colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,urlcolor=blue!45!black,breaklinks=true]{hyperref}
+\usepackage{url,caption,longtable,pdflscape}
+\hypersetup{pdftitle={面向股票截面预测的约束驱动模型搜索与训练方法 - write-up},pdfauthor={Shihan Zhao},pdfsubject={Factor Neighborhood Ranker}}
+\captionsetup[figure]{skip=6pt,font=small,hypcap=false}
+% Figures may float within the current chapter so text can fill page ends.
+\usepackage[section]{placeins}
+\usepackage{afterpage,float,needspace}
+\newenvironment{methodfigure}{\begin{figure}[!htbp]}{\end{figure}}
+\renewcommand{\topfraction}{.90}
+\renewcommand{\bottomfraction}{.75}
+\renewcommand{\textfraction}{.08}
+\renewcommand{\floatpagefraction}{.65}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{4}
+\setlength{\textfloatsep}{12pt plus 2pt minus 2pt}
+\setlength{\intextsep}{10pt plus 2pt minus 2pt}
+\raggedbottom
+\makeatletter
+\renewcommand{\maketitle}{%
+  \thispagestyle{plain}%
+  \begin{center}
+    {\LARGE\@title\par}\vspace{.65em}
+    {\normalsize\@author\par}\vspace{.35em}
+    {\small\@date\par}
+  \end{center}\vspace{.5em}%
+}
+\makeatother
+
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.10em}
+\linespread{1.18}
+\ctexset{section={
+  beforeskip=16pt plus 3pt minus 2pt,
+  afterskip=9pt plus 2pt minus 2pt
+},subsection={beforeskip=13pt plus 2pt minus 2pt,afterskip=7pt plus 1pt minus 1pt}}
+\emergencystretch=2em
+\setlist{nosep,leftmargin=2em}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small 约束驱动的模型搜索与训练}
+\fancyhead[R]{\small write-up}
+\fancyfoot[C]{\small\thepage}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Beta}{\bm{\beta}}
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\clip}{\operatorname{clip}}
+\newcommand{\softplus}{\operatorname{softplus}}
+\newcommand{\E}{\mathbb{E}}
+\title{\bfseries 面向股票截面预测的约束驱动模型搜索与训练方法\\[0.35em]\large 跨年验证、动态剪枝与受限增量学习}
+\author{Shihan Zhao}
+\date{2026年10月16日}
+\begin{document}
+\maketitle
+\begin{abstract}
+低信噪比与时变分布使股票预测面临双重挑战：模型需要从有限数据中提取有效信息，研究者也需要在反复搜索中控制选择偏差。本文以沪深300短期截面预测为案例，归纳一套约束驱动的模型搜索与训练方法：按标签成熟时间划分训练样本，以跨年匹配比较评价增量，逐级筛选候选，并通过受限修正和原始输入复算衔接训练与部署。最终模型FNR（Factor Neighborhood Ranker，因子邻域排序模型）在公榜取得平均秩信息系数（RankIC）0.0850、组合信息比率（IR）5.5684，总成绩排名第2；在私榜取得RankIC 0.0825、IR 5.2132，总成绩排名第1。两项指标相对公榜分别仅回落2.94\%和6.38\%，为固定方案在额外隐藏评价中的表现提供了证据。结合候选淘汰记录和局部对照，本文分析各项约束如何影响研究决策，并讨论反复使用开发数据所带来的选择偏差及其验证需求。
+\end{abstract}
+\noindent\textbf{关键词：}时间验证；模型选择；自适应搜索；增量学习；选择偏差；截面预测
+
+\section{引言}
+本研究以沪深300指数增强与截面选股比赛为背景。参赛者利用历史行情、公司基本面和风险因子，比较同一交易日的沪深300成分股，判断哪些股票在下一个交易周期内更可能表现较好，并为每只股票生成预测分数。组织方通过统一的组合构建和回测程序，将分数转化为投资配置，在控制相对指数的风险偏离和交易成本的条件下，争取获得超过沪深300指数的收益。评分同时考察排序精度与组合收益。
+
+模型研究还包含持续的方案选择：变量、结构、训练目标的选择以及候选的去留，都依赖已有评价结果。反复搜索可能放大偶然优势，排序指标的提升也未必转化为组合收益。本文关注如何识别可靠增量：在一致的时间边界与评价条件下比较候选，用跨年表现约束局部优势，并将有效改动落实为可复现的部署模型。
+
+Cawley与Talbot\cite{cawley2010}指出，反复优化模型选择准则会造成选择偏差。Dwork等\cite{dwork2015}研究自适应复用数据的统计有效性，说明先前评价如何影响后续检验。这些工作提示，解释最终模型的表现时，需要同时考察其选择过程，并以未参与该轮选择的数据进一步检验。
+
+有限计算预算下，Hyperband\cite{li2018}通过逐级分配资源提高超参数搜索效率，为尽早终止较差候选提供了可借鉴的机制。预测器内部则可通过结构与正则控制拟合自由度：LightGBM\cite{ke2017}用提升树刻画表格数据关系，TabM\cite{gorishniy2025}以共享参数实现神经集成，岭回归\cite{hoerl1970}通过收缩系数稳定估计，成对排序损失\cite{burges2005}直接学习相对顺序。本文以这些方法为构件，检验其在截面预测中的增量价值。
+
+针对上述问题，本文将模型研究组织为约束驱动的搜索与训练流程。训练样本按标签成熟时间划分，历史成员与预处理统计遵循当时可见的信息，以控制泄漏风险；候选通过跨年匹配比较逐级筛选，减少对单一时期的依赖。模型采用集成、收缩和受限修正控制噪声响应，并结合长期预测与近期统计适应市场变化。部署前重新加载权重、从原始窗口复算预测，以核对研究和部署的一致性；方案固定后再接受私榜评价。FNR在公榜取得RankIC 0.0850、IR 5.5684，总成绩排名第2；在私榜取得RankIC 0.0825、IR 5.2132，总成绩排名第1。下文依据保存的实验与搜索记录，分析这些措施如何影响候选取舍，并讨论最终结果所支持的结论。
+
+上述搜索与训练方法在研究者与大语言模型（LLM）的持续对话中迭代形成。研究者设定目标与约束，结合评价反馈判断研究方向；LLM参与文献分析、假设提出、实验设计与结果分析，并编写代码、调用工具，执行数据处理、特征构造、模型训练、回测、候选剪枝、日志记录和部署核验。实验结果进一步用于修订研究方案，推动方法逐步完善。本研究使用GPT-6 Astra与GPT-6.1 Sol，累计 token 用量 1B。
+
+\section{约束驱动的搜索与训练方法}\label{sec:methods}
+\subsection{研究流程与比较基础}\label{sec:protocol}
+研究流程包含四个环节：约定信息与评价口径、生成并筛选候选、冻结模型、进行隐藏评价（图\ref{fig:workflow}）。每批实验须先固定允许输入、标签和比较条件，再明确候选相对参考对象的改动及停止条件。候选通过筛选后进入完整比较和部署确认，下一批实验则根据当前结果调整方向。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rounded corners=3pt,align=center,text width=6cm,minimum height=1.1cm,inner sep=7pt}]
+\node[bx,rh shared,text width=13.4cm] (contract) at (0,0) {\textbf{信息与评价契约}\\许可数据、标签端点、历史成员、日期与费用口径};
+\node[bx,rh base] (proposal) at (-3.7,-2) {\textbf{提出增量假设}\\明确改动、参考模型与筛选规则};
+\node[bx,rh teacher] (fit) at (3.7,-2) {\textbf{按时间训练}\\逐年合法样本、冻结预处理与权重};
+\node[bx,rh neighbor] (evidence) at (3.7,-4) {\textbf{匹配评价与诊断}\\年度差值、较弱年份、完整区间结果};
+\node[bx,rh correction] (decision) at (-3.7,-4) {\textbf{依据结果决定下一步}\\剪枝、缩小改动、扩展或保留};
+\node[bx,rh fusion,text width=13.4cm] (freeze) at (0,-6.1) {\textbf{冻结方案与部署确认}\\保存模型重载、原始窗口重放、最终允许历史训练};
+\node[bx,rh shared,text width=13.4cm] (private) at (0,-8.1) {\textbf{额外隐藏评价}\\固定版本在额外保留数据上评价};
+\draw[rh flow] (contract.south -| proposal.north)--(proposal.north);
+\draw[rh flow] (contract.south -| fit.north)--(fit.north);
+\draw[rh flow] (proposal)--(fit);\draw[rh flow] (fit)--(evidence);
+\draw[rh flow] (evidence)--(decision);\draw[rh flow] (decision)--(proposal);
+\draw[rh flow] (decision.south)--(freeze.north -| decision.south);
+\draw[rh flow] (evidence.south)--(freeze.north -| evidence.south);
+\draw[rh flow] (freeze)--(private);
+\end{tikzpicture}
+\caption{模型搜索与训练流程。开发评价用于选择候选，固定方案接受额外隐藏评价。}\label{fig:workflow}
+\end{methodfigure}
+
+研究记录包括各候选的配置、父模型、输入日期、有效样本、训练资源与运行状态。失败与被剪枝候选的配置和运行记录同样存档，缺失指标与已完成的年度评价分别标注，便于复核选择依据。
+
+\subsection{时间边界与年度向前验证}\label{sec:time}
+令交易日$t$的可见股票集合为$\mathcal U_t$。模型在$t$日收盘后生成对以下收益的预测：
+\begin{equation}
+ y_{i,t}=\frac{O_{i,t+2}}{O_{i,t+1}}-1,\qquad H=1,
+ \label{eq:label}
+\end{equation}
+其中$O$为官方复权开盘价，下标按市场交易日历推进。标签成熟表示其收益终点已发生，计算所需价格已可见。评价年$Y$的训练集合要求
+\begin{equation}
+ \mathcal D_Y^{\rm train}=\{(i,t):\operatorname{exit}(y_{i,t})<\operatorname{start}(Y)\}.
+ \label{eq:purge}
+\end{equation}
+例如，12月末的信号若需要下一年开盘价才能完成标签，应从新年验证模型的训练样本中排除。
+
+同一候选在各年度保持相同结构与超参数，使用对应训练期的数据重新估计权重和预处理参数。部署版本在方案确定后，使用部署起点之前的全部允许历史重新训练。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small]
+\node[anchor=east] at (-5.2,0) {评价折};
+\foreach \x/\lab in {-3.8/{初始训练期},-1.4/{$Y_1$},1/{$Y_2$},3.4/{$Y_3$},5.8/{$Y_4$}}{\node at (\x,0) {\lab};}
+\foreach \row/\year/\count in {1/{$Y_1$}/1,2/{$Y_2$}/2,3/{$Y_3$}/3,4/{$Y_4$}/4}{
+ \node[anchor=east] at (-5.2,-\row*.85) {\year};
+ \foreach \j in {1,...,\count}{\pgfmathsetmacro{\x}{-6.2+2.4*\j}\node[draw=rhBase,fill=rhBase!12,minimum width=2.1cm,minimum height=.5cm] at (\x,-\row*.85) {};}
+ \pgfmathsetmacro{\vx}{-6.2+2.4*(\count+1)}
+ \node[draw=rhFusion,fill=rhFusion!10,minimum width=2.1cm,minimum height=.5cm] at (\vx,-\row*.85) {评价};
+}
+\node[align=center,text width=13cm] at (0,-4.6) {蓝色：仅用该折之前的合法训练标签；红色：年度评价\\每条训练标签的退出端点都必须在红色区间之前};
+\node[draw=rhShared,rounded corners,align=center,text width=13cm,inner sep=7pt] at (0,-6.0) {最终部署：方案确定后，使用部署前全部允许历史重训\\年度验证成绩来自各年度单独训练的模型};
+\end{tikzpicture}
+\caption{扩展窗口的年度向前验证。每个评价期使用更早的数据训练，边界按标签退出时间划分；滚动训练窗口也遵循这一要求。}\label{fig:time}
+\end{methodfigure}
+
+缺失值填补所需的统计量、均值与标准差、数值特征分段编码的分位节点及统计先验，均在对应训练期内估计。历史截面的股票池与邻域依据当时可见信息构建；标签成熟后，再确定损失和事后指标的有效样本。
+
+年度训练边界按标签退出时间切分，避免跨期标签进入训练；多个评价期共同检验配置的稳定性。反复用于模型选择的区间按开发数据处理，方案固定后再进入额外评价。
+
+\subsection{排序、组合与成本的评价口径}\label{sec:metrics}
+平均RankIC先计算同日预测分数与真实收益的Spearman秩相关，再按有效日期等权平均，用于衡量横截面上的排序能力。组合IR衡量相对基准的主动收益与跟踪误差之比。令组合和基准的日收益分别为$r^p_t,r^b_t$，主动收益为$e_t=r^p_t-r^b_t$，本地回测采用skd-backtest框架\cite{skdbacktest}，IR的计算口径为
+\begin{equation}
+ \operatorname{IR}=\frac{R^p_{\rm ann}-R^b_{\rm ann}}{\sqrt{252}\operatorname{sd}_{\rm sample}(e_t)},
+ \label{eq:ir}
+\end{equation}
+其中年化收益由净值复合计算，分母为主动收益的年化波动，即跟踪误差。完整区间的IR需要从该区间净值与主动收益序列重新计算。
+
+同一轮比较须固定日期、标签、有效样本、组合约束与成本口径。佣金与滑点按实际成交额计入现金流，并以较高成本情景检验敏感性。组合约束统一规定多空方向、仓位、个股权重、相对基准偏离、风险暴露与换手上限。
+
+年度独立账户与跨期连续账户的指标分别计算、分别报告。比较候选与参考模型时，须保持相同账户口径，并核对成交、净值衔接与跨年仓位处理。仅评价排序的实验与不同成本情景分别标注。
+\subsection{增量归因：区分信息、表示与学习器}\label{sec:attribution}
+
+
+设候选$c$在年份$Y$的训练结果为$\theta_{c,Y}=\mathcal A(\mathcal D_Y^{\rm train};c)$，候选$c$由特征、标签、学习器与训练配置共同定义。在相同日期集合上，计算其相对参考模型$b$的增量：
+\begin{equation}
+ \Delta_{c,Y}=\operatorname{MeanRankIC}(c,Y)-\operatorname{MeanRankIC}(b,Y).
+ \label{eq:delta}
+\end{equation}
+通过固定其余条件，可以将差值归因于被改变的因素；同时改变特征和学习器时，差值反映二者的联合效果。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rounded corners=3pt,align=center,text width=5.5cm,minimum height=1.2cm,inner sep=7pt}]
+\node[bx,rh shared] (a) at (-3.8,0) {\textbf{原输入 + 原学习器}\\参考单元};
+\node[bx,rh base] (b) at (3.8,0) {\textbf{扩展输入 + 原学习器}\\检验输入增量};
+\node[bx,rh teacher] (c) at (-3.8,-3) {\textbf{原输入 + 新学习器}\\检验建模增量};
+\node[bx,rh correction] (d) at (3.8,-3) {\textbf{扩展输入 + 新学习器}\\检验组合及交互};
+\draw[rh flow] (a)--node[above,font=\footnotesize]{固定学习器}(b);
+\draw[rh flow] (c)--(d);
+\draw[rh flow] (a)--node[left,font=\footnotesize]{固定输入}(c);
+\draw[rh flow] (b)--(d);
+\node[align=center,text width=13.5cm] at (0,-4.65) {四个单元均须使用相同年份、标签与评价掩码\\纵向检验学习器增量，横向检验输入增量};
+\end{tikzpicture}
+\caption{输入与学习器的匹配比较设计。学习表示的评价还需计入上游教师的输入、模型容量与训练成本；实际完成的比较以实验记录为准。}\label{fig:attribution}
+\end{methodfigure}
+
+输入扩展、手工因子、监督学习表示和学习器改变分别组织对照。输入实验固定模型容量与训练目标，学习器实验固定输入与目标；在有互补证据后，再检验联合配置。
+
+监督学习表示还需核对上游标签的使用范围。折外教师由未见当前样本标签的模型生成特征；同一训练期内依次训练表示与下游模型时，则将其作为分阶段训练评价，并检查样本内表示偏差。
+
+\subsection{候选提议、逐级评价与动态剪枝}\label{sec:search}
+研究者围绕可检验假设提出候选，例如平滑强度对排序与换手的影响、收益残差目标的增量价值，以及潜在因子数量对跨年稳定性的作用。每批仅改变少量关键因素，再根据结果调整强度、扩展局部搜索或终止该方向。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rounded corners=3pt,align=center,text width=8.5cm,minimum height=.9cm,inner sep=7pt}]
+\node[bx,rh base] (p) at (-1.5,0) {提出少量候选，记录父模型、参数与停止条件};
+\node[bx,rh teacher] (s) at (-1.5,-1.6) {在预定筛选年份训练与评价};
+\node[bx,rh neighbor] (g) at (-1.5,-3.2) {检查年度增量与机制诊断};
+\node[bx,rh correction] (e) at (-1.5,-4.8) {有依据者扩展到其余年份与完整区间};
+\node[bx,rh fusion] (f) at (-1.5,-6.4) {按相同口径比较；冻结或提出下一批};
+\foreach \a/\b in {p/s,s/g,g/e,e/f}{\draw[rh flow] (\a)--(\b);}
+\node[draw=rhShared,fill=rhShared!5,rounded corners,align=center,text width=2.8cm,inner sep=7pt] (stop) at (5.2,-3.2) {不通过：保留失败证据\\未测年份保持缺失};
+\draw[rh flow] (g.east)--(stop.west);
+\draw[rh flow] (f.west)--(-6.8,-6.4)--(-6.8,0)--(p.west);
+\node[font=\footnotesize,rotate=90,fill=white] at (-6.8,-3.2) {调整下一批，不改写已完成结果};
+\end{tikzpicture}
+\caption{逐级评价与动态剪枝。较弱年份用于初筛，通过者完成全部年份的评价。}\label{fig:search}
+\end{methodfigure}
+
+对一批候选，进入下一轮的条件可写为
+\begin{equation}
+ G(c)=\mathbf 1\!\left\{
+ \Delta_{c,Y}\geq-\epsilon_Y\ \forall Y\in\mathcal Y,
+ \quad \Delta_{c,\rm pooled}\geq\eta
+ \right\},
+ \label{eq:gate}
+\end{equation}
+其中$\epsilon_Y$为该轮允许的年度回退，$\eta$为合并增量门槛，均按当轮研究目标设定。涉及组合表现时，还需加入年度或连续账户的IR条件。上述阈值用于候选选择；相应的选择偏差与验证需求在第\ref{sec:limitations}节讨论。
+
+
+
+较弱年份用于低成本初筛，通过者再完成其余年份。每一搜索轮次都记录各候选的训练轮数、已评价年份和完成状态。训练轮数须预先固定，或仅通过训练期内部验证选择；年度评价标签用于比较已训练候选。
+
+
+剪枝将计算资源集中到较有希望的候选，跨年门槛则要求增益覆盖多个时期。随着候选增加，研究也会更充分地利用开发数据中的偶然规律，因此所选方案仍需接受独立于该轮选择的评价。
+
+\FloatBarrier
+\subsection{受限增量训练}\label{sec:regularization}
+以已验证的参考预测为起点，新增模块采用受限增量形式
+\begin{equation}
+ s_{i,t}=s^0_{i,t}+\delta_{i,t},\qquad
+ u_{i,t}=c_\delta\tanh f_\phi(z_{i,t}),\qquad
+ \delta_{i,t}=u_{i,t}-\frac1{N_t}\sum_j u_{j,t}.
+ \label{eq:bounded}
+\end{equation}
+$s^0$是参考预测，$z$是既有表示或其扩展，$\phi$为新增参数，$N_t$为当日股票数，$c_\delta$为固定限幅常数。输出层零初始化使初始增量为零。保持项持续惩罚对参考预测的偏离，拟合误差的下降需要补偿这项代价。限幅作用于去均值前的输出$u_{i,t}$，因此单只股票满足$|\delta_{i,t}|\leq2c_\delta$，任意两只股票满足$|\delta_{i,t}-\delta_{j,t}|\leq2c_\delta$。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rounded corners=3pt,align=center,text width=6cm,minimum height=1.1cm,inner sep=7pt}]
+\node[bx,rh base] (base) at (-3.7,0) {\textbf{保留已有判断}\\冻结基础预测与条件表示};
+\node[bx,rh correction] (new) at (3.7,0) {\textbf{学习有限增量}\\较小修正头、零起点、输出限幅};
+\node[bx,rh fusion,text width=13.4cm] (out) at (0,-2) {\textbf{参考 + 增量}\\保持惩罚约束对参考预测的偏离};
+\draw[rh flow] (base.south)--(out.north -| base.south);
+\draw[rh flow] (new.south)--(out.north -| new.south);
+\node[bx,rh correction,text width=3.8cm] at (-5,-4) {排名误差\\维持横截面拟合};
+\node[bx,rh correction,text width=3.8cm] at (0,-4) {增量平方惩罚\\对偏离参考付出代价};
+\node[bx,rh correction,text width=3.8cm] at (5,-4) {邻域成对损失\\关注相近股票的错排};
+\node[font=\footnotesize,align=center] at (0,-5.3) {以年度匹配比较评价扩大训练范围的收益\\解冻上游后需重新生成表示与训练下游模块};
+\end{tikzpicture}
+\caption{受限增量训练：排名与配对损失学习新增信息，保持惩罚约束对参考预测的偏离。}\label{fig:regularization}
+\end{methodfigure}
+
+对应的一类训练目标为
+\begin{equation}
+ \mathcal L=\mathcal L_{\rm rank}
+ +\lambda\mathcal L_{\rm preserve}
+ +\gamma\mathcal L_{\rm pair}.
+ \label{eq:loss}
+\end{equation}
+排名误差学习同日相对位置，保持项惩罚增量平方，配对项学习相近股票的收益顺序，并对收益差距采用有上限的权重。保持强度与配对权重通过匹配对照选择，组合表现由训练后的回测评价。
+
+其他约束包括训练期标准化、按日期归一化权重、权重衰减、Dropout、固定训练轮数和低秩共同因子结构。共同因子描述多只股票的同步变化，低秩结构限制此类变化方向的数量。排名标签减弱极端收益幅度的影响，原值特征和收益差距加权保留部分幅度信息。异构学习器与不同标签的集成则利用预测误差的差异，争取降低估计波动。
+
+分层解冻和全参数解冻扩大了可训练范围。评价这类改动时，需要核对实际可训练参数，重新生成年度表示与邻域，并重训依赖它们的下游网络。上游表示改变后，需同步更新预测缓存，即为后续比较保存的中间表示和预测结果。最终以候选相对参考模型的年度表现决定取舍。
+
+\subsection{长期参照与受限近期适应}\label{sec:adaptation}
+已实现收益可用于补充长期预测。对信号日$t$，按标签式\eqref{eq:label}，可使用的历史信号满足$s+2\leq t$；从许可历史窗口内选取最近$m$个此类截面，构成$\mathcal S_t$。窗口长度、特征维数和时间权重在离线阶段固定。
+
+\begin{samepage}
+令$z_{i,s}$为历史股票特征，$v_{i,s}$为预先确定的收益目标，$a_{i,s}$为截面样本权重，构造$A_s=\sum_i a_{i,s}z_{i,s}z_{i,s}^{\mathsf T}$与$b_s=\sum_i a_{i,s}z_{i,s}v_{i,s}$。给定先验系数$\beta_0$、惩罚矩阵$P$及日期权重$w_s$，当前窗口的回归系数为
+\begin{equation}
+ \widehat\beta_t=(\sum_{s\in\mathcal S_t} w_sA_s+P)^{-1}
+                  (\sum_{s\in\mathcal S_t} w_sb_s+P\beta_0).
+ \label{eq:ridge}
+\end{equation}
+\end{samepage}
+模型权重、先验系数$\beta_0$、惩罚矩阵$P$、日期权重及统计规则均在离线阶段确定。当前窗口内的样本用于计算临时系数，进而生成增量分数；历史输入在每次预测时重建。低维表示、先验收缩与输出限幅共同约束短期噪声的影响。
+
+\begin{methodfigure}\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ bx/.style={rounded corners=3pt,align=center,text width=6cm,minimum height=1.2cm,inner sep=7pt}]
+\node[bx,rh base] (prior) at (-3.7,0) {\textbf{长期部分}\\冻结预测器、固定先验与正则};
+\node[bx,rh neighbor] (hist) at (3.7,0) {\textbf{近期部分}\\最近$m$个成熟标签截面的统计量};
+\node[bx,rh correction,text width=13.4cm] (update) at (0,-2) {\textbf{当前窗口修正}\\固定先验下的低维闭式回归};
+\node[bx,rh fusion,text width=13.4cm] (rank) at (0,-4) {\textbf{约束信息的使用区域}\\保留参考头部，允许增强信号重排其余股票};
+\draw[rh flow] (prior.south)--(update.north -| prior.south);
+\draw[rh flow] (hist.south)--(update.north -| hist.south);
+\draw[rh flow] (update)--(rank);
+\node[font=\footnotesize,align=center] at (0,-5.25) {模型权重、先验与正则固定；窗口统计随数据改变\\每次预测均从当前许可窗口重建历史输入};
+\end{tikzpicture}
+\caption{近期信息的使用方式：固定先验、窗口统计校正与排序范围约束共同控制调整幅度。}\label{fig:adaptation}
+\end{methodfigure}
+
+近期增量可进一步限制在预先指定的排序区域内：保留参考模型的头部名单与顺序，仅重排其余股票。保留范围通过匹配比较确定，使信息利用强度成为可检验的变量。对持仓与收益的影响仍由同一组合构造规则评价。
+
+\subsection{从研究结果到可执行模型的确认}\label{sec:deployment}
+搜索阶段利用预测缓存加速比较。部署确认时，重新加载保存的权重，从原始输入计算特征与预测，并核对输入输出格式、数值导出结果及资源占用。年度模型用于对应年份的评价，部署模型使用部署前全部允许历史训练。
+
+预测缓存上的评价与原始输入复算出现差异时，应追查特征重建、浮点精度导致的并列排名及导出实现等来源，并以实际部署路径的复算值报告结果。复现记录注明完整流程重训、局部重训和输入输出检查各自覆盖的范围。
+
+
+\Needspace{8\baselineskip}
+\section{方法的应用与实证结果}\label{sec:experiments}
+\subsection{评价设置与模型关系}
+本地开发使用2016--2022年公开数据，按第\ref{sec:time}节的时间边界逐年训练，评价2019--2022年。四个年度均参与了模型选择，所报告的本地结果用于描述开发期表现。最终部署模型使用全部允许历史，训练标签最晚退出日期为2022年12月30日。模型输入仅来自比赛许可的行情、因子和风险数据，行情回看控制在120个交易日以内。
+
+组合评价采用第\ref{sec:metrics}节定义的IR。基准成本为单边3bp佣金加2bp滑点，压力情景为3bp加7bp；组合优化器要求仅做多、目标满仓，单股权重上限为10\%，主动权重偏离上限为1\%，行业与风格偏离上限各为2\%。每次调仓的双边权重变化总量满足$\sum_i|w_i^{\rm target}-w_i^{\rm current}|\leq1.0$，股票池外持仓的清仓也计入其中。早期零成本诊断和后续含成本结果在表中分别注明，年度IR逐年报告。平台完整组合配置未披露。
+
+模型研究从输入与学习器比较，逐步转向因子表示、相对收益修正和近期信息利用。图\ref{fig:submission-history}与表\ref{tab:model-context}给出主要候选的关系和成绩；下文按研究假设组织对照，说明每一阶段如何应用第\ref{sec:methods}章的方法。
+
+\begin{figure}[H]\centering
+% BEGIN SUBMISSION TIKZ
+\begin{tikzpicture}[font=\footnotesize,line join=round]
+\node[anchor=west,font=\small\bfseries] at (0,11.600000000000001){(a) 公榜 RankIC};
+\draw[black!12] (0,7.0649) -- (13.44,7.0649);
+\node[anchor=east] at (-.15,7.0649) {0.0600};
+\draw[black!12] (0,8.2811) -- (13.44,8.2811);
+\node[anchor=east] at (-.15,8.2811) {0.0700};
+\draw[black!12] (0,9.4973) -- (13.44,9.4973);
+\node[anchor=east] at (-.15,9.4973) {0.0800};
+\draw[black!12] (0,10.7135) -- (13.44,10.7135);
+\node[anchor=east] at (-.15,10.7135) {0.0900};
+\draw[black!50] (0,6.7) -- (13.44,6.7);
+\fill[rhBase] (0.0000,7.0892) circle (1.5pt);
+\fill[rhBase] (0.4200,7.5392) circle (1.5pt);
+\fill[rhBase] (0.8400,8.5973) circle (1.5pt);
+\fill[rhBase] (1.2600,8.8770) circle (1.5pt);
+\fill[rhBase] (1.6800,8.9500) circle (1.5pt);
+\fill[rhBase] (2.1000,8.8041) circle (1.5pt);
+\fill[rhBase] (2.5200,8.9622) circle (1.5pt);
+\fill[rhBase] (2.9400,9.2541) circle (1.5pt);
+\fill[rhBase] (3.3600,9.3392) circle (1.5pt);
+\fill[rhBase] (3.7800,9.0716) circle (1.5pt);
+\fill[rhBase] (4.2000,9.2419) circle (1.5pt);
+\fill[rhBase] (4.6200,8.8770) circle (1.5pt);
+\fill[rhBase] (5.0400,9.4122) circle (1.5pt);
+\fill[rhBase] (5.4600,9.6554) circle (1.5pt);
+\fill[rhBase] (5.8800,9.4122) circle (1.5pt);
+\fill[rhBase] (6.3000,9.7405) circle (1.5pt);
+\fill[rhBase] (6.7200,9.5824) circle (1.5pt);
+\fill[rhBase] (7.1400,9.3878) circle (1.5pt);
+\fill[rhBase] (7.5600,9.7770) circle (1.5pt);
+\fill[rhBase] (7.9800,9.7770) circle (1.5pt);
+\fill[rhBase] (8.4000,9.8865) circle (1.5pt);
+\fill[rhBase] (8.8200,10.0081) circle (1.5pt);
+\fill[rhBase] (9.2400,10.0081) circle (1.5pt);
+\fill[rhBase] (9.6600,9.9959) circle (1.5pt);
+\fill[rhBase] (10.0800,9.9959) circle (1.5pt);
+\fill[rhBase] (10.5000,10.0689) circle (1.5pt);
+\fill[rhBase] (10.9200,10.0932) circle (1.5pt);
+\fill[rhBase] (11.3400,9.9108) circle (1.5pt);
+\fill[rhBase] (11.7600,9.8865) circle (1.5pt);
+\fill[rhBase] (12.1800,10.0446) circle (1.5pt);
+\fill[rhBase] (12.6000,10.0081) circle (1.5pt);
+\fill[rhBase] (13.0200,10.1297) circle (1.5pt);
+\fill[rhBase] (13.4400,10.1054) circle (1.5pt);
+\draw[rhBase,line width=.8pt] (0.0000,7.0892) .. controls (0.1400,7.2392) and (0.2800,7.3287) .. (0.4200,7.5392) .. controls (0.5600,7.7497) and (0.7000,8.4498) .. (0.8400,8.5973) .. controls (0.9800,8.7448) and (1.1200,8.8384) .. (1.2600,8.8770) .. controls (1.4000,8.9156) and (1.5400,8.9500) .. (1.6800,8.9500) .. controls (1.8200,8.9500) and (1.9600,8.8041) .. (2.1000,8.8041) .. controls (2.2400,8.8041) and (2.3800,8.8938) .. (2.5200,8.9622) .. controls (2.6600,9.0305) and (2.8000,9.2101) .. (2.9400,9.2541) .. controls (3.0800,9.2980) and (3.2200,9.3392) .. (3.3600,9.3392) .. controls (3.5000,9.3392) and (3.6400,9.0716) .. (3.7800,9.0716) .. controls (3.9200,9.0716) and (4.0600,9.2419) .. (4.2000,9.2419) .. controls (4.3400,9.2419) and (4.4800,8.8770) .. (4.6200,8.8770) .. controls (4.7600,8.8770) and (4.9000,9.3007) .. (5.0400,9.4122) .. controls (5.1800,9.5236) and (5.3200,9.6554) .. (5.4600,9.6554) .. controls (5.6000,9.6554) and (5.7400,9.4122) .. (5.8800,9.4122) .. controls (6.0200,9.4122) and (6.1600,9.7405) .. (6.3000,9.7405) .. controls (6.4400,9.7405) and (6.5800,9.6406) .. (6.7200,9.5824) .. controls (6.8600,9.5243) and (7.0000,9.3878) .. (7.1400,9.3878) .. controls (7.2800,9.3878) and (7.4200,9.7770) .. (7.5600,9.7770) .. controls (7.7000,9.7770) and (7.8400,9.7770) .. (7.9800,9.7770) .. controls (8.1200,9.7770) and (8.2600,9.8481) .. (8.4000,9.8865) .. controls (8.5400,9.9249) and (8.6800,10.0081) .. (8.8200,10.0081) .. controls (8.9600,10.0081) and (9.1000,10.0081) .. (9.2400,10.0081) .. controls (9.3800,10.0081) and (9.5200,9.9959) .. (9.6600,9.9959) .. controls (9.8000,9.9959) and (9.9400,9.9959) .. (10.0800,9.9959) .. controls (10.2200,9.9959) and (10.3600,10.0568) .. (10.5000,10.0689) .. controls (10.6400,10.0811) and (10.7800,10.0932) .. (10.9200,10.0932) .. controls (11.0600,10.0932) and (11.2000,9.9251) .. (11.3400,9.9108) .. controls (11.4800,9.8965) and (11.6200,9.8865) .. (11.7600,9.8865) .. controls (11.9000,9.8865) and (12.0400,10.0446) .. (12.1800,10.0446) .. controls (12.3200,10.0446) and (12.4600,10.0081) .. (12.6000,10.0081) .. controls (12.7400,10.0081) and (12.8800,10.1297) .. (13.0200,10.1297) .. controls (13.1600,10.1297) and (13.3000,10.1135) .. (13.4400,10.1054);
+\draw[black!45,line width=.4pt] (1.2600,8.8770) -- (0.4200,9.8622);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (0.4200,9.8622) {D223};
+\draw[black!45,line width=.4pt] (2.5200,8.9622) -- (1.6800,10.2878);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (1.6800,10.2878) {FA004 5\%};
+\draw[black!45,line width=.4pt] (2.9400,9.2541) -- (2.9400,11.0541);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (2.9400,11.0541) {FA004 20\%};
+\draw[black!45,line width=.4pt] (3.3600,9.3392) -- (4.2000,10.4459);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (4.2000,10.4459) {FA004 27.5\%};
+\draw[black!45,line width=.4pt] (5.0400,9.4122) -- (5.4600,11.1392);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (5.4600,11.1392) {FA004 40\%};
+\draw[black!45,line width=.4pt] (7.5600,9.7770) -- (7.1400,10.9568);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (7.1400,10.9568) {FP01};
+\draw[black!45,line width=.4pt] (8.4000,9.8865) -- (9.2400,10.9568);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (9.2400,10.9568) {RH50};
+\draw[black!45,line width=.4pt] (13.0200,10.1297) -- (11.3400,10.7135);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (11.3400,10.7135) {K3};
+\draw[black!45,line width=.4pt] (13.4400,10.1054) -- (13.4400,11.0784);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (13.4400,11.0784) {FNR};
+\node[anchor=west,font=\small\bfseries] at (0,5.6000000000000005){(b) 公榜组合 IR};
+\draw[black!12] (0,1.3311) -- (13.44,1.3311);
+\node[anchor=east] at (-.15,1.3311) {0};
+\draw[black!12] (0,2.4287) -- (13.44,2.4287);
+\node[anchor=east] at (-.15,2.4287) {2};
+\draw[black!12] (0,3.5262) -- (13.44,3.5262);
+\node[anchor=east] at (-.15,3.5262) {4};
+\draw[black!12] (0,4.6238) -- (13.44,4.6238);
+\node[anchor=east] at (-.15,4.6238) {6};
+\draw[black!50] (0,0.7) -- (13.44,0.7);
+\fill[rhFusion] (0.0000,1.2203) circle (1.5pt);
+\fill[rhFusion] (0.4200,1.0847) circle (1.5pt);
+\fill[rhFusion] (0.8400,1.4825) circle (1.5pt);
+\fill[rhFusion] (1.2600,1.7899) circle (1.5pt);
+\fill[rhFusion] (1.6800,1.3858) circle (1.5pt);
+\fill[rhFusion] (2.1000,1.6544) circle (1.5pt);
+\fill[rhFusion] (2.5200,2.4263) circle (1.5pt);
+\fill[rhFusion] (2.9400,3.1077) circle (1.5pt);
+\fill[rhFusion] (3.3600,2.8028) circle (1.5pt);
+\fill[rhFusion] (3.7800,2.7995) circle (1.5pt);
+\fill[rhFusion] (4.2000,3.0180) circle (1.5pt);
+\fill[rhFusion] (4.6200,2.0480) circle (1.5pt);
+\fill[rhFusion] (5.0400,3.2280) circle (1.5pt);
+\fill[rhFusion] (5.4600,2.9280) circle (1.5pt);
+\fill[rhFusion] (5.8800,1.9411) circle (1.5pt);
+\fill[rhFusion] (6.3000,2.5692) circle (1.5pt);
+\fill[rhFusion] (6.7200,2.9294) circle (1.5pt);
+\fill[rhFusion] (7.1400,2.7546) circle (1.5pt);
+\fill[rhFusion] (7.5600,4.2042) circle (1.5pt);
+\fill[rhFusion] (7.9800,4.2042) circle (1.5pt);
+\fill[rhFusion] (8.4000,4.3869) circle (1.5pt);
+\fill[rhFusion] (8.8200,3.9843) circle (1.5pt);
+\fill[rhFusion] (9.2400,4.1603) circle (1.5pt);
+\fill[rhFusion] (9.6600,3.1738) circle (1.5pt);
+\fill[rhFusion] (10.0800,4.3190) circle (1.5pt);
+\fill[rhFusion] (10.5000,3.9960) circle (1.5pt);
+\fill[rhFusion] (10.9200,3.4357) circle (1.5pt);
+\fill[rhFusion] (11.3400,4.2816) circle (1.5pt);
+\fill[rhFusion] (11.7600,4.3869) circle (1.5pt);
+\fill[rhFusion] (12.1800,4.3082) circle (1.5pt);
+\fill[rhFusion] (12.6000,3.6077) circle (1.5pt);
+\fill[rhFusion] (13.0200,3.6077) circle (1.5pt);
+\fill[rhFusion] (13.4400,4.3869) circle (1.5pt);
+\draw[rhFusion,line width=.8pt] (0.0000,1.2203) .. controls (0.1400,1.1751) and (0.2800,1.0847) .. (0.4200,1.0847) .. controls (0.5600,1.0847) and (0.7000,1.3669) .. (0.8400,1.4825) .. controls (0.9800,1.5981) and (1.1200,1.7899) .. (1.2600,1.7899) .. controls (1.4000,1.7899) and (1.5400,1.3858) .. (1.6800,1.3858) .. controls (1.8200,1.3858) and (1.9600,1.5216) .. (2.1000,1.6544) .. controls (2.2400,1.7873) and (2.3800,2.1850) .. (2.5200,2.4263) .. controls (2.6600,2.6676) and (2.8000,3.1077) .. (2.9400,3.1077) .. controls (3.0800,3.1077) and (3.2200,2.8049) .. (3.3600,2.8028) .. controls (3.5000,2.8006) and (3.6400,2.7995) .. (3.7800,2.7995) .. controls (3.9200,2.7995) and (4.0600,3.0180) .. (4.2000,3.0180) .. controls (4.3400,3.0180) and (4.4800,2.0480) .. (4.6200,2.0480) .. controls (4.7600,2.0480) and (4.9000,3.2280) .. (5.0400,3.2280) .. controls (5.1800,3.2280) and (5.3200,3.0814) .. (5.4600,2.9280) .. controls (5.6000,2.7747) and (5.7400,1.9411) .. (5.8800,1.9411) .. controls (6.0200,1.9411) and (6.1600,2.4166) .. (6.3000,2.5692) .. controls (6.4400,2.7218) and (6.5800,2.9294) .. (6.7200,2.9294) .. controls (6.8600,2.9294) and (7.0000,2.7546) .. (7.1400,2.7546) .. controls (7.2800,2.7546) and (7.4200,4.2042) .. (7.5600,4.2042) .. controls (7.7000,4.2042) and (7.8400,4.2042) .. (7.9800,4.2042) .. controls (8.1200,4.2042) and (8.2600,4.3869) .. (8.4000,4.3869) .. controls (8.5400,4.3869) and (8.6800,3.9843) .. (8.8200,3.9843) .. controls (8.9600,3.9843) and (9.1000,4.1603) .. (9.2400,4.1603) .. controls (9.3800,4.1603) and (9.5200,3.1738) .. (9.6600,3.1738) .. controls (9.8000,3.1738) and (9.9400,4.3190) .. (10.0800,4.3190) .. controls (10.2200,4.3190) and (10.3600,4.1326) .. (10.5000,3.9960) .. controls (10.6400,3.8594) and (10.7800,3.4357) .. (10.9200,3.4357) .. controls (11.0600,3.4357) and (11.2000,4.2191) .. (11.3400,4.2816) .. controls (11.4800,4.3440) and (11.6200,4.3869) .. (11.7600,4.3869) .. controls (11.9000,4.3869) and (12.0400,4.3554) .. (12.1800,4.3082) .. controls (12.3200,4.2610) and (12.4600,3.6077) .. (12.6000,3.6077) .. controls (12.7400,3.6077) and (12.8800,3.6077) .. (13.0200,3.6077) .. controls (13.1600,3.6077) and (13.3000,4.1272) .. (13.4400,4.3869);
+\draw[black!50] (0.0,0.7) -- ++(0,-.08) node[below] {1};
+\draw[black!50] (0.42,0.7) -- ++(0,-.08) node[below] {2};
+\draw[black!50] (1.26,0.7) -- ++(0,-.08) node[below] {4};
+\draw[black!50] (2.1,0.7) -- ++(0,-.08) node[below] {6};
+\draw[black!50] (2.94,0.7) -- ++(0,-.08) node[below] {8};
+\draw[black!50] (3.78,0.7) -- ++(0,-.08) node[below] {10};
+\draw[black!50] (4.62,0.7) -- ++(0,-.08) node[below] {12};
+\draw[black!50] (5.46,0.7) -- ++(0,-.08) node[below] {14};
+\draw[black!50] (6.3,0.7) -- ++(0,-.08) node[below] {16};
+\draw[black!50] (7.14,0.7) -- ++(0,-.08) node[below] {18};
+\draw[black!50] (7.9799999999999995,0.7) -- ++(0,-.08) node[below] {20};
+\draw[black!50] (8.82,0.7) -- ++(0,-.08) node[below] {22};
+\draw[black!50] (9.66,0.7) -- ++(0,-.08) node[below] {24};
+\draw[black!50] (10.5,0.7) -- ++(0,-.08) node[below] {26};
+\draw[black!50] (11.34,0.7) -- ++(0,-.08) node[below] {28};
+\draw[black!50] (12.18,0.7) -- ++(0,-.08) node[below] {30};
+\draw[black!50] (13.02,0.7) -- ++(0,-.08) node[below] {32};
+\node at (6.72,-.05) {提交编号};
+\draw[black!45,line width=.4pt] (1.6800,1.3858) -- (1.2600,0.8921);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (1.2600,0.8921) {QF001};
+\draw[black!45,line width=.4pt] (2.1000,1.6544) -- (2.9400,1.7152);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (2.9400,1.7152) {ST10};
+\draw[black!45,line width=.4pt] (2.5200,2.4263) -- (1.6800,3.1970);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (1.6800,3.1970) {FA004 5\%};
+\draw[black!45,line width=.4pt] (2.9400,3.1077) -- (2.9400,4.2396);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (2.9400,4.2396) {FA004 20\%};
+\draw[black!45,line width=.4pt] (3.3600,2.8028) -- (4.2000,3.7457);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (4.2000,3.7457) {FA004 27.5\%};
+\draw[black!45,line width=.4pt] (5.0400,3.2280) -- (5.0400,4.3494);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (5.0400,4.3494) {FA004 40\%};
+\draw[black!45,line width=.4pt] (7.5600,4.2042) -- (6.3000,4.8433);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (6.3000,4.8433) {FP01};
+\draw[black!45,line width=.4pt] (8.4000,4.3869) -- (9.2400,4.8433);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (9.2400,4.8433) {RH50};
+\draw[black!45,line width=.4pt] (12.6000,3.6077) -- (11.7600,2.7579);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (11.7600,2.7579) {K2};
+\draw[black!45,line width=.4pt] (13.0200,3.6077) -- (13.0200,2.8677);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (13.0200,2.8677) {K3};
+\draw[black!45,line width=.4pt] (13.4400,4.3869) -- (13.4400,4.8433);
+\node[fill=white,inner sep=2pt,font=\footnotesize] at (13.4400,4.8433) {FNR};
+\end{tikzpicture}
+% END SUBMISSION TIKZ
+\caption{历次提交的公榜表现。}\label{fig:submission-history}
+\end{figure}
+
+\afterpage{\clearpage
+\begin{landscape}
+\thispagestyle{plain}
+\begingroup
+\fontsize{9}{11}\selectfont
+\setlength{\tabcolsep}{3.5pt}
+\renewcommand{\arraystretch}{1.0}
+\captionof{table}{关键模型的结构、筛选状态与已保存成绩。}\label{tab:model-context}
+\begin{tabularx}{\linewidth}{@{}>{\centering\arraybackslash}p{.8cm}>{\raggedright\arraybackslash}p{2.1cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{2.35cm}r rrrr rr@{}}\toprule
+\shortstack{提交\\编号} & 模型 / 配置 & 继承关系与主要改动 & 研究状态 & 本地RankIC & \multicolumn{4}{c}{年度组合IR} & \multicolumn{2}{c}{公榜}\\
+\cmidrule(lr){6-9}\cmidrule(l){10-11}
+ & & & & 四年汇总 & 2019 & 2020 & 2021 & 2022 & RankIC & IR\\\midrule
+-- & M5 & 在早期43特征排名回归模型上增加20个历史量价特征，固定80棵提升树。 & 基准对照 & 0.0486 & 9.5913 & 3.5127 & 3.1239 & 2.0595 & -- & --\\[2pt]
+-- & M5+v3/v4 & 在M5上新增市场广度、量价和历史收益因子，模型配置不变。 & 检验手工因子增益 & 0.0521 & 10.1006 & 3.5725 & 3.0753 & 2.4150 & -- & --\\[2pt]
+4 & D223 & 在树模型路线中引入表格神经网络，集成排名并修正风格暴露。 & 后续模型基础 & 0.0821 & 8.9213 & 4.6267 & 2.7680 & 2.7104 & 0.0749 & 0.8360\\[2pt]
+5 & QF001 & D223加入3因子网络，分数划为25档；与ST10、FA004并行研究。 & 公榜表现不佳淘汰 & 0.0826 & 8.7638 & 4.7000 & 2.9708 & 2.8228 & 0.0755 & 0.0997\\[2pt]
+6 & ST10 & D223加入3因子网络，以Student-t收益分布训练，新信号占10\%。 & 公榜表现不佳淘汰 & 0.0834 & 9.1228 & 4.5314 & 2.6587 & 2.8441 & 0.0743 & 0.5892\\[2pt]
+7 & FA004 5\% & D223加入4因子网络，因子从当日截面学习，新信号占5\%。 & 保留，继续改进 & 0.0827 & 8.6350 & 4.8229 & 2.7701 & 2.8137 & 0.0756 & 1.9957\\[2pt]
+8 & FA004 20\% & 复用FA004 5\%的全部组件，仅将辅助权重改为20\%。 & 保留，扩大权重 & 0.0839 & 8.7794 & 5.0565 & 2.8307 & 3.2077 & 0.0780 & 3.2373\\[2pt]
+9 & FA004 27.5\% & 复用FA004 20\%的全部组件，仅将辅助权重改为27.5\%。 & IR回落 & 0.0843 & -- & -- & -- & -- & 0.0787 & 2.6817\\[2pt]
+13 & FA004 40\% & 复用同一D223与因子网络，将辅助权重改为40\%。 & 后续修正基础 & 0.0840 & 7.6335 & 4.7625 & 2.5583 & 3.0726 & 0.0793 & 3.4566\\[2pt]
+19 & FP01 & 基于FA004 40\%，冻结因子网络，新增相似股票之间的相对收益修正。 & 保留邻域修正 & 0.0849 & -- & -- & -- & -- & 0.0823 & 5.2354\\[2pt]
+21 & RH50 & 在FP01上增加约束较弱的修正头，与原头等权组合。 & 提供最终头部 & 0.0850 & 8.2951 & 4.7434 & 2.5842 & 3.2551 & 0.0832 & 5.5684\\[2pt]
+31 & K2 & 以RH50的比例微调版为基础，加入22维、20日成熟收益统计校正。 & 近期校正基准 & 0.0872 & 8.8025 & 4.7551 & 2.9107 & 3.5042 & 0.0842 & 4.1484\\[2pt]
+-- & AC（未约束） & 在K2上扩展至30维表示并重训修正网络，允许调整全部排名。 & 年度IR恶化淘汰 & 0.0897 & 9.5982 & 5.0703 & 2.9081 & 3.0626 & -- & --\\[2pt]
+32 & K3 & 沿用AC新增信号，保留K2前20\%排名，仅重排其余股票。 & 提供最终其余排序 & 0.0892 & 8.8834 & 5.4053 & 2.9850 & 3.4317 & 0.0852 & 4.1484\\[2pt]
+33 & FNR & 组合RH50与K3：保留RH50前60只股票的名单和顺序，以K3重排其余股票。 & 私榜总分第一 & 0.0887 & 9.0078 & 5.3513 & 2.7407 & 3.5383 & 0.0850 & 5.5684\\[2pt]
+\bottomrule\end{tabularx}
+\par\vspace{6pt}\footnotesize
+注：提交编号与图7一致。M5及其手工因子扩展的RankIC按年度有效日合并（967日），IR为零成本；其余采用连续RankIC与单边5bp成本。“--”表示未提交或指标缺失。
+跨阶段标签边界存在差异，增量归因采用同阶段匹配比较；AC为预测缓存上的筛选结果。来源见E1--E11。
+\par\endgroup
+\end{landscape}}
+
+\subsection{固定基准上的输入归因与学习器选择}
+这一阶段应用第\ref{sec:attribution}节的匹配比较，先明确增益来自何处。M5源于早期学习器与特征对照：在43个当日特征的LightGBM排名回归模型上增加20个历史量价特征，形成63特征版本。历史特征涵盖收益、波动率、成交活跃度和流动性，最长回看61个交易日。模型固定为80棵树，目标为下一交易周期收益的截面排名，在多个年度重复训练后，作为因子实验的固定对照。
+
+固定M5配置后，新手工因子组合将平均RankIC从0.0486提高到0.0521，增量为0.0035；已有丰富输入的一组扩展带来0.0104的增量。前者检验新公式，后者检验已有变量的组合价值。据此，后续工作转向信息表示与模型利用能力。
+
+学习器比较改为固定347维输入、排名目标和24轮训练。多层感知机、残差网络、TabM及采用分段线性数值编码的PLE--TabM，平均RankIC分别为0.0605、0.0547、0.0787和0.0802。在这组固定输入、目标和训练轮数的比较中，普通TabM含32160个参数，少于多层感知机的53249个，同时取得更高RankIC。这提示网络结构可能影响信息利用效率；正则化和优化配置也可能贡献差异，其作用仍需进一步对照。
+
+\Needspace{7\baselineskip}
+随后按第\ref{sec:search}节逐级检验训练目标、窗口、平滑及集成配置。D223由树模型、普通TabM和两种PLE--TabM组成，再加入中段平滑与风格暴露修正。相对该阶段原有部署配方，保存权重的原始输入确认显示，连续RankIC从0.0806提高到0.0821，5bp成本下的连续IR从3.8784提高到4.4771，四个年度的两项指标均改善。这是整套配置的联合增益。
+
+该阶段保存180条评价和成本回放记录，其中25条被剪枝。对已选配方按年分层、以20交易日循环块进行2000次配对重采样，RankIC增量的95\%条件区间为$[0.0008,0.0023]$。这为固定候选的历史增益提供了稳定性诊断，区间未包含此前搜索产生的选择不确定性。
+
+\subsection{因子结构筛选与信号利用强度}
+在D223基础上，条件因子网络尝试从当日股票截面学习共同变化，并产生辅助排序。候选按第\ref{sec:search}节先评价部分年份，再决定是否扩展：单因子配置在两个筛选年份均降低IR而停止；六因子配置在这两年改善，却在2019年未通过RankIC门槛；四因子FA004通过四年检查，成为保留候选。
+
+QF001、ST10与FA004是同批提出的并行分支。QF001采用分档输出，ST10采用Student-t收益分布；在这三个候选中，QF001的本地IR最高，ST10的本地RankIC最高，FA004则在公榜两项指标上均优于二者。据此，后续候选选择以公榜表现为依据，保留FA004的表示。这里的公榜反馈参与了候选选择，解释这些结果时需同时考虑网络、训练目标和分数输出方式的差异。
+
+为区分因子信息与利用强度，下一组比较保持D223和FA004的参数不变，仅调整辅助排名权重。权重从5\%提高至20\%时，公榜RankIC从0.0756升至0.0780，IR从1.9957升至3.2373；继续提高至27.5\%后，RankIC上升而IR回落。40\%版本的公榜IR达到3.4566，但权重更高的60\%版本两项指标均低于40\%版本。由此，研究保留已有效的因子表示，将后续重点转向信息使用方式与训练目标。
+
+\subsection{冻结表示下的邻域修正与解冻对照}
+这一阶段应用第\ref{sec:regularization}节的受限增量训练。FP01以FA004 40\%为参考，冻结原因子网络，以因子方差缩放的个股因子暴露与Barra风险特征，共同定义股票间距离，为每只股票选择24个近邻。新增网络综合自身、邻域均值及两者差值，学习相近股票之间的相对收益。
+
+修正网络仅含2049个参数，输出层零初始化，中心化前用$0.05\tanh(\cdot)$限幅；训练目标为式\eqref{eq:loss}，由排名误差、保持惩罚和邻域配对损失组成。固定基础集成和40\%辅助权重，使新增模块从原预测出发，检验局部相对收益信息的价值。
+
+匹配对照比较了仅用Barra定义邻域和加入因子暴露距离两种配置。加入因子暴露距离后，连续RankIC从0.0847升至0.0849，四个年度中三个改善。与同阶段原FA004参考相比，FP01的RankIC增量为0.0009。FP01的公榜RankIC为0.0823、IR为5.2354，均高于原40\%版本。该阶段的本地筛选依据RankIC与配对诊断，组合IR证据来自公榜反馈。
+
+RH50保留这套表示和邻域方法，增加保持惩罚较弱的第二个修正头，与原头等权组合。其本地RankIC达到0.0850，公榜为0.0832/5.5684。相对于继续放大原信号权重，这组结果支持通过小规模重训改善因子信息的利用方式。
+
+为检验冻结范围是否限制了增益，还实施了分层及全参数解冻。各候选重新生成年度表示与邻域，再重训两个修正头，融合比例固定。分层候选中，仅有一个通过2022年初筛并扩展至2020、2021年，但三年平均RankIC增量为0.0002，低于预设0.0005门槛；六个全参数候选均因2022年回退超过0.0002而停止。这些对照使研究继续保留有效表示，转向近期信息校正。
+
+\subsection{已实现收益统计与排序范围约束}
+K2将第\ref{sec:adaptation}节的近期校正应用于RH50的双头比例微调版本。每次预测使用最近20个标签已成熟的收益截面，信号日期为$t-21,\ldots,t-2$；最近标签在$t$日开盘时已实现。22维特征、先验系数、正则化参数、时间衰减和输出限幅均在离线阶段固定，式\eqref{eq:ridge}根据当前窗口生成临时修正。K2的本地RankIC达到0.0872，公榜RankIC为0.0842，但公榜IR降至4.1484，排序精度与组合IR在这一版本中出现分离，汇总指标尚不足以确定其中的持仓或成本原因。
+
+后续候选AC在原22维表示之外加入8维冻结神经摘要，并重训使用178维上下文的修正网络。本地RankIC升至0.0897，但2022年IR较K2下降0.4417，超过该轮允许的0.10回退。按照第\ref{sec:search}节的联合门槛，该候选被淘汰；另一个达到RankIC增量要求的配置也因2021年IR下降约0.330被舍弃。
+
+K3保留AC新增信号，以K2为排序参照，仅重排后80\%股票，前20\%名单与顺序保持。原始输入复算后，连续RankIC为0.0892，相对K2增加0.0020；四年IR中三个提高，2022年下降0.0726，满足当轮回退限制。公榜RankIC升至0.0852，IR仍为4.1484。在本地评价下，排序范围约束保留了排序增量，并将年度IR回退控制在设定门槛内；公榜结果促使后续重新选择头部参照。
+
+\subsection{最终组合与部署确认}
+FNR进一步将排序参照改为RH50：保留其前60只股票的名单与顺序，以K3重排其余240只。该改动对应第\ref{sec:adaptation}节的排序范围约束，检验新增信号在参考头部之外的价值。表\ref{tab:local}给出固定成本与组合设置下的匹配结果，连续RankIC覆盖970个有效日期。
+
+\begin{table}[htbp]\centering\small
+\caption{本地开发区间比较，所有列采用相同评价口径。}\label{tab:local}
+\begin{tabular}{lrrr}\toprule
+指标 & RH50参考 & K3窗口增强 & FNR\\\midrule
+连续Mean RankIC & 0.0850 & 0.0892 & 0.0887\\
+2019年IR & 8.2951 & 8.8834 & 9.0078\\
+2020年IR & 4.7434 & 5.4053 & 5.3513\\
+2021年IR & 2.5842 & 2.9850 & 2.7407\\
+2022年IR & 3.2551 & 3.4317 & 3.5383\\\bottomrule
+\end{tabular}
+\end{table}
+
+相对RH50，FNR的RankIC提高0.0037，四个年度IR均提高；相对K3，RankIC减少0.0005，年度IR有升有降。FNR的公榜RankIC为0.0850，较K3降低0.0002；IR为5.5684，较K3提高1.4200，与RH50相同。固定外层头部、去掉内层保护的另一项消融使RankIC略降，三个年度IR提高、一个下降，说明内层保护的独立作用仍需进一步检验。
+
+部署确认遵循第\ref{sec:deployment}节：逐年加载保存权重，从当前许可历史窗口重建特征与预测，以原始输入复算值报告K3及FNR的结果。在2019年12月31日、2021年6月15日、2022年5月6日和2022年12月30日这4个交易日，各核对300只股票，共1200个股票-日预测分数，均与参考数值完全一致。这些检查将统计改进与实际部署模型对应起来。
+
+\subsection{公私榜评价与结论范围}
+表\ref{tab:hidden}报告固定方案的公私榜成绩。公榜参与了上述候选选择，私榜是在最终版本固定后获得的额外评价。FNR在\href{https://datatech.geekpie.club/c/csi300-2026/leaderboard}{官方榜单}中的公榜总成绩排名第2，私榜总成绩排名第1。公榜成绩经提交记录核验，私榜成绩来自参赛反馈；平台未披露隐藏日期、逐日收益、持仓及完整组合设置。
+
+\begin{table}[htbp]\centering\small
+\caption{FNR的隐藏评价反馈。差值为私榜减公榜；相对变化以公榜为分母。}\label{tab:hidden}
+\begin{tabular}{lrrrr}\toprule
+指标 & 公榜 & 私榜 & 绝对变化 & 相对变化\\\midrule
+Mean RankIC & 0.0850 & 0.0825 & $-0.0025$ & $-2.94\%$\\
+组合IR & 5.5684 & 5.2132 & $-0.3552$ & $-6.38\%$\\
+总成绩排名 & 2 & 1 & -- & --\\\bottomrule
+\end{tabular}
+\end{table}
+
+私榜RankIC为公榜的97.06\%，IR为93.62\%，给出了FNR在本次隐藏评价中的表现。指标差异同时包含时期、样本组成、评价设置、随机波动和模型选择的影响；相对回落用于描述两次评价的差异，选择偏差的份额仍需更完整的数据与独立对照估计。
+
+\section{抗过拟合机制的解释与边界}
+\subsection{证据与机制解释}
+\begin{table}[htbp]\centering\small
+\caption{关于有效性的结论分级。}\label{tab:evidence}
+\begin{tabularx}{\linewidth}{p{2.1cm}XX}\toprule
+证据层级 & 主要内容 & 适用范围\\\midrule
+直接观测 & 标签边界检查、匹配结果、候选淘汰、输入一致性、公私榜成绩。 & 已记录的实验、被测输入和对应评价区间。\\
+机制解释 & 跨年筛选约束单年偏好；收缩限制噪声响应；异构集成利用误差差异。 & 对设计作用的合理解释，独立收益仍待匹配消融。\\
+待验证贡献 & 搜索策略的净收益、选择偏差大小、各模块的独立贡献。 & 需要流程对照、额外隐藏区间与重复实验。\\\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{信息隔离}\quad
+标签时间边界、训练期统计与历史成员处理，使模型训练和评价遵循当时可用的信息。信息隔离建立了可信比较的基础，反复选择带来的偏差则需要由额外评价检验。
+
+\noindent\textbf{跨年比较}\quad
+跨年比较要求候选同时适应多个时期，减少选择对某段特殊行情的依赖。各年份共享市场结构且被反复观察，因此仍存在样本相关性和选择偏差；较弱年份初筛的主要收益是节省计算。
+
+\noindent\textbf{保留长期信息}\quad
+冻结基座、小型修正、保持惩罚和限幅，使新增模型倾向于在既有预测附近学习；近期回归以固定先验和低维统计约束调节适应幅度。这些设计在保留长期信息与吸收近期变化之间折中。参考模型失效时，较强的保持约束也可能延缓纠正。
+
+\noindent\textbf{实现一致性}\quad
+权重重载和原始输入复算用于定位实现偏差，使研究与部署评价同一预测器。它们与按时间验证互为补充：前者确认实现一致，后者检验预测效果。
+
+\subsection{验证局限与后续检验}\label{sec:limitations}
+本地年份与公榜均被反复用于开发，FNR经历了自适应选择。当前证据主要来自固定随机种子的年度比较、神经网络在两个额外随机种子（17、123）下的局部检查和一次私榜评价。后续需通过嵌套验证、多重比较校正与多种子检验，量化选择偏差与训练波动。
+
+现有结果支持FNR在该任务上的有效性。若要进一步估计研究流程本身的贡献，需要在相近数据和计算预算下比较不同搜索策略，再将各自选出的方案交给共同的独立评价区间。
+
+\subsection{可迁移的研究原则}
+可迁移的实践是为每个候选明确参考对象、比较条件、有效时期与接受门槛，使搜索方向能够灵活调整，接受改动的依据仍可复核。
+
+后续研究可在新增时间区间前固定模型与主要假设，保存逐日预测、成本、持仓及收益，并采用按日期分块的自助法估计不确定性。结构约束采用匹配消融，搜索策略采用独立评价。私榜反馈一旦用于下一轮改动，即纳入开发数据，并另设最终评价区间。
+
+\section{结论}
+本文从沪深300截面预测研究中归纳了四项相互配合的方法：按标签成熟时间隔离训练样本，以跨年匹配比较评价增量，逐级筛选候选，以及通过受限修正和原始输入复算连接训练与部署。FNR在公榜取得RankIC 0.0850、IR 5.5684，总成绩排名第2；在私榜取得RankIC 0.0825、IR 5.2132，总成绩排名第1。
+
+候选淘汰记录表明，这套流程可执行、可复核；私榜结果提供了FNR在该隐藏区间的评价证据。各项机制的一般有效性、独立贡献和选择偏差大小，仍需更严格的对照检验。后续工作的重点是将这一研究流程用于新的时间区间，在固定方案后积累更多独立证据。
+
+\begin{thebibliography}{99}\small
+\setlength{\itemsep}{1pt}\linespread{1.0}\selectfont
+\bibitem{cawley2010} Cawley G C, Talbot N L C. On Over-fitting in Model Selection and Subsequent Selection Bias in Performance Evaluation. \emph{Journal of Machine Learning Research}, 11:2079--2107, 2010. \href{https://www.jmlr.org/papers/v11/cawley10a.html}{出版方全文}.
+\bibitem{dwork2015} Dwork C, Feldman V, Hardt M, et al. Preserving Statistical Validity in Adaptive Data Analysis. \emph{Proceedings of the 47th Annual ACM Symposium on Theory of Computing}, 117--126, 2015. \href{https://arxiv.org/abs/1411.2664}{arXiv:1411.2664}.
+\bibitem{li2018} Li L, Jamieson K, DeSalvo G, et al. Hyperband: A Novel Bandit-Based Approach to Hyperparameter Optimization. \emph{Journal of Machine Learning Research}, 18(185):1--52, 2018. \href{https://www.jmlr.org/papers/v18/16-558.html}{出版方全文}.
+\bibitem{ke2017} Ke G, Meng Q, Finley T, et al. LightGBM: A Highly Efficient Gradient Boosting Decision Tree. \emph{Advances in Neural Information Processing Systems}, 30, 2017. \href{https://proceedings.neurips.cc/paper_files/paper/2017/hash/6449f44a102fde848669bdd9eb6b76fa-Abstract.html}{原文}.
+\bibitem{gorishniy2025} Gorishniy Y, Kotelnikov A, Babenko A. TabM: Advancing Tabular Deep Learning with Parameter-Efficient Ensembling. \emph{International Conference on Learning Representations}, 2025. \href{https://arxiv.org/abs/2410.24210}{arXiv:2410.24210}.
+\bibitem{hoerl1970} Hoerl A E, Kennard R W. Ridge Regression: Biased Estimation for Nonorthogonal Problems. \emph{Technometrics}, 12(1):55--67, 1970. \href{https://doi.org/10.1080/00401706.1970.10488634}{doi:10.1080/00401706.1970.10488634}.
+\bibitem{burges2005} Burges C, Shaked T, Renshaw E, et al. Learning to Rank Using Gradient Descent. \emph{Proceedings of the 22nd International Conference on Machine Learning}, 89--96, 2005. \href{https://doi.org/10.1145/1102351.1102363}{doi:10.1145/1102351.1102363}.
+\bibitem{skdbacktest} HenryZ16. \emph{skd-backtest}: 面向指数增强研究的日频Python回测框架 [软件]. \url{https://github.com/HenryZ16/skd-backtest}（访问日期：2026年10月17日）。
+\end{thebibliography}
+
+\appendix
+\section{证据来源与复核范围}
+本文数值来自保存的研究材料。证据副本位于发布目录的\nolinkurl{writeups_aux/search_methodology/}中，\texttt{evidence/index.json}列出原文件与发布副本的SHA-256校验值及处理范围。以下证据路径均相对于该附件目录。表\ref{tab:sources}给出主要证据映射，具体实验范围以对应记录为准。
+
+公榜数据于2026年10月16日从比赛提交记录核验，整理后的提交成绩绘图数据随文保存；私榜数据来自参赛者反馈。原始实验材料支持任务内结果，参考文献提供一般方法背景。
+
+\begin{table}[H]\centering\small
+\caption{主要事实的证据映射，完整路径见补充索引。}\label{tab:sources}
+\begin{tabularx}{\linewidth}{p{1cm}p{4.3cm}X}\toprule
+编号 & 材料 & 本文使用范围\\\midrule
+E1 & 原始复现说明与回测实现 & 年度向前训练、标签边界、换手约束及统计诊断。\\
+E2 & 固定M5因子归因报告 & 手工公式、丰富输入和学习表示的贡献区分。\\
+E3 & 神经网络实际实验记录 & 匹配输入与轮数的架构结果及参数量。\\
+E4 & D223最终研究报告 & 实际搜索与剪枝、成本情景、条件重采样结果。\\
+E5 & 条件因子容量与正则报告 & 因子数、宽度与跨年晋级的实际比较。\\
+E6 & 邻域重构训练记录 & 2049参数修正头、保持惩罚与匹配对照。\\
+E7 & 分层与全参数解冻记录 & 可训练范围、重建预测缓存、年度筛选及停止结果。\\
+E8 & K3原始窗口确认报告 & 高分候选的回退、最终统计增强及缓存差异。\\
+E9 & 头部保持及消融结果 & 最终年度表现与保护机制的不确定性。\\
+E10 & 最终审计和参赛反馈 & 有限输入一致性、最终公私榜点估计。\\
+E11 & 提交成绩记录 & 按原始文件编号记录公榜RankIC与IR。\\\bottomrule
+\end{tabularx}
+\end{table}
+\end{document}

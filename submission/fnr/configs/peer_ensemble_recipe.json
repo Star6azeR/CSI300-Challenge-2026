@@ -1,0 +1,47 @@
+{
+  "score_arithmetic": "float32_heads_float64_average_float32_output",
+  "members": [
+    {
+      "directory": "adapter",
+      "weight": 0.475,
+      "config": {
+        "name": "P01",
+        "neighborhood": "factor_barra",
+        "pair_coefficient": 0.02,
+        "width": 16,
+        "delta_cap": 0.05,
+        "neighbors": 24,
+        "epochs": 16,
+        "learning_rate": 0.001,
+        "weight_decay": 0.001,
+        "preserve_coefficient": 2.0,
+        "pair_temperature": 0.1,
+        "return_gap_scale": 0.02,
+        "seed": 42,
+        "batch_days": 16,
+        "outer_auxiliary_weight": 0.4
+      }
+    },
+    {
+      "directory": "adapter_r1",
+      "weight": 0.525,
+      "config": {
+        "name": "R1",
+        "seed": 42,
+        "pair_coefficient": 0.02,
+        "neighborhood": "factor_barra",
+        "width": 16,
+        "delta_cap": 0.05,
+        "neighbors": 24,
+        "epochs": 16,
+        "learning_rate": 0.001,
+        "weight_decay": 0.001,
+        "preserve_coefficient": 1.0,
+        "pair_temperature": 0.1,
+        "return_gap_scale": 0.02,
+        "batch_days": 16,
+        "outer_auxiliary_weight": 0.4
+      }
+    }
+  ]
+}

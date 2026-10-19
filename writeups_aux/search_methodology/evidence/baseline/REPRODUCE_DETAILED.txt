@@ -1,0 +1,72 @@
+CSI300 detailed research report - reproduction and evidence index
+Date: 2026-10-01
+
+Run from:
+.
+
+1. This machine's already installed RESEARCH environment (Python 3.12.14):
+   source research/.venv/bin/activate
+   export DYLD_LIBRARY_PATH="$PWD/research/.venv/lib/python3.12/site-packages/sklearn/.dylibs"
+
+2. Re-run training, examples, feature parity and yearly comparisons in a NEW directory:
+   python research/extended_experiments.py --output-dir research/results_reproduction
+
+   Never overwrite results_detailed when reproducing the report. The training script
+   rejects an output directory that already has experiment_summary.json.
+
+3. Replay all 8 fitted/ensemble candidates with two identical portfolio cost settings:
+   python research/detailed_backtests.py --input-dir research/results_reproduction
+
+   Backtest results are resumable: completed cases in results.json are skipped.
+   Do not point to a partially modified experiment while resuming.
+
+4. Compute paired date-block bootstrap and worked examples:
+   python research/detailed_diagnostics.py --results-dir research/results_reproduction
+
+5. Compare reproduced outputs to research/results_detailed:
+   annual_results.csv: 36 model/year rows; same row counts and dates.
+   feature_parity.json: 7 dates x 300 rows x 63 columns; zero observed discrepancy.
+   backtests/results.csv: 16 cases, each with 240 paired IC dates;
+                         max_ic_error < 1e-10.
+   Timings are machine-specific and are not expected to match exactly.
+
+6. To rebuild the report using its original evidence directory:
+   export MPLCONFIGDIR="$PWDhistorical_tmp/matplotlib"
+   python research/detailed_figures.py
+   python research/build_detailed_report.py
+
+Research versions:
+Python 3.12.14, pandas 2.2.3, numpy 2.3.5, pyarrow 25.0.1,
+scipy 1.18.1, lightgbm 4.7.0, catboost 1.2.10,
+scikit-learn 1.9.1, skd-backtest 1.0.1.
+Report: reportlab 4.4.9; figures: matplotlib 3.11.2.
+
+IMPORTANT: these versions document the local RESEARCH environment, not a tested
+Python 3.11 submission requirements file. Installed scipy 1.18.1 requires Python
+>=3.12. The competition requires Python 3.11. Select compatible final dependencies,
+then test the actual submission package in Python 3.11 before submitting.
+
+The research scripts read Data and write research outputs. They are not a ready-to-
+upload inference package. A final submission needs package-local feature helpers,
+model-only frozen artifact reads, exact dependency pins, and the required
+InferenceModel interface. Frozen models stored here were trained only through 2021
+for the 2022 audit. A final full-public-data retrain was NOT performed.
+
+Methods and results:
+- detailed_features.py: shared bounded feature and H=1 label definitions.
+- extended_experiments.py: 9 paths, 4 expanding-window yearly folds, 28 actual fits.
+- detailed_backtests.py: frozen models, fresh per-day as-of features, uniform constraints.
+- detailed_diagnostics.py: block bootstrap, actual worked examples, quarterly IC.
+- results_detailed/design.json: fixed parameters written before new results.
+- results_detailed/models/: native LGBM/CatBoost and numeric Ridge artifacts.
+- results_detailed/annual_results.csv, summary.csv, daily_ic.csv: model results.
+- results_detailed/predictions_YYYY.parquet: full valid-universe daily predictions.
+- results_detailed/block_bootstrap.csv: 20-day circular paired blocks, 2000 resamples.
+- results_detailed/backtests/results.csv: all 15 platform metrics + time/check results.
+- results_detailed/backtests/<case>/: predictions, rankic, target_weights, orders,
+  trades, positions, equity_curve, run log, configuration/metrics artifacts.
+- results_detailed/report_evidence_manifest.json: code/result SHA-256 checksums.
+- results/source_manifest.json: earlier source-file audit manifest.
+
+2022 had been viewed in the prior report; it is explicitly
+an already-observed terminal audit set, not an untouched final test.
